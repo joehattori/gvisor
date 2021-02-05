@@ -176,7 +176,7 @@ func (g *Gofer) Execute(_ context.Context, f *flag.FlagSet, args ...interface{})
 
 	mountIdx := 1 // first one is the root
 	for _, m := range spec.Mounts {
-		if specutils.Is9PMount(m) {
+		if specutils.IsGoferMount(m) {
 			cfg := fsgofer.Config{
 				ROMount: isReadonlyMount(m.Options) || conf.Overlay,
 				HostUDS: conf.FSGoferHostUDS,

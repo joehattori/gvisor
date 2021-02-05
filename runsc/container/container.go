@@ -885,7 +885,7 @@ func (c *Container) createGoferProcess(spec *specs.Spec, conf *config.Config, bu
 	// Add root mount and then add any other additional mounts.
 	mountCount := 1
 	for _, m := range spec.Mounts {
-		if specutils.Is9PMount(m) {
+		if specutils.IsGoferMount(m) {
 			mountCount++
 		}
 	}
