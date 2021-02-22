@@ -623,9 +623,9 @@ func (dut *DUT) SetNonBlocking(t *testing.T, fd int32, nonblocking bool) {
 
 	flags := dut.Fcntl(t, fd, unix.F_GETFL, 0)
 	if nonblocking {
-		flags |= unix.O_NONBLOCK
+		flags |= int32(ONonBlock)
 	} else {
-		flags &= ^unix.O_NONBLOCK
+		flags &= ^int32(ONonBlock)
 	}
 	dut.Fcntl(t, fd, unix.F_SETFL, flags)
 }

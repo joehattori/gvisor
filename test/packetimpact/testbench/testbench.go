@@ -24,6 +24,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -33,6 +35,8 @@ var (
 	RPCKeepalive = 10 * time.Second
 	// RPCTimeout is the gRPC timeout.
 	RPCTimeout = 100 * time.Millisecond
+	// ONonBlock is the O_NONBLOCK flag value on the DUT.
+	ONonBlock = unix.O_NONBLOCK
 
 	// dutTestNetsJSON is the json string that describes all the test networks to
 	// duts available to use.
@@ -86,6 +90,7 @@ func registerFlags(fs *flag.FlagSet) {
 	fs.BoolVar(&Native, "native", Native, "whether the test is running natively")
 	fs.DurationVar(&RPCTimeout, "rpc_timeout", RPCTimeout, "gRPC timeout")
 	fs.DurationVar(&RPCKeepalive, "rpc_keepalive", RPCKeepalive, "gRPC keepalive")
+	fs.IntVar(&ONonBlock, "o_nonblock", ONonBlock, "O_NONBLOCK value on DUT")
 	fs.StringVar(&dutTestNetsJSON, "dut_test_nets_json", dutTestNetsJSON, "path to the dut test nets json file")
 }
 
