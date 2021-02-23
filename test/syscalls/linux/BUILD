@@ -2383,6 +2383,7 @@ cc_library(
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/time",
         gtest,
+        "//test/util:temp_path",
         "//test/util:test_util",
         "//test/util:thread_util",
     ],

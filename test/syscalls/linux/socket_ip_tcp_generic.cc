@@ -20,15 +20,18 @@
 #include <poll.h>
 #include <stdio.h>
 #include <sys/ioctl.h>
+#include <sys/sendfile.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
 
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/memory/memory.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "test/syscalls/linux/socket_test_util.h"
+#include "test/util/temp_path.h"
 #include "test/util/test_util.h"
 #include "test/util/thread_util.h"
 
@@ -1056,6 +1059,25 @@ TEST_P(TCPSocketPairTest, SpliceToPipe) {
 
   std::vector<char> rbuf(buf.size());
   ASSERT_THAT(read(rfd.get(), rbuf.data(), rbuf.size()),
+              SyscallSucceedsWithValue(buf.size()));
+  EXPECT_EQ(memcmp(rbuf.data(), buf.data(), buf.size()), 0);
+}
+
+TEST_P(TCPSocketPairTest, Sendfile) {
+  auto sockets = ASSERT_NO_ERRNO_AND_VALUE(NewSocketPair());
+  const TempPath in_file = ASSERT_NO_ERRNO_AND_VALUE(TempPath::CreateFile());
+  const FileDescriptor in_fd =
+      ASSERT_NO_ERRNO_AND_VALUE(Open(in_file.path(), O_RDWR));
+  // Fill with some random data.
+  std::vector<char> buf(kPageSize / 2);
+  RandomizeBuffer(buf.data(), buf.size());
+  ASSERT_THAT(pwrite(in_fd.get(), buf.data(), buf.size(), 0),
+              SyscallSucceedsWithValue(buf.size()));
+
+  EXPECT_THAT(sendfile(sockets->first_fd(), in_fd.get(), nullptr, 1 << 30),
+              SyscallSucceedsWithValue(buf.size()));
+  std::vector<char> rbuf(buf.size());
+  ASSERT_THAT(read(sockets->second_fd(), rbuf.data(), rbuf.size()),
               SyscallSucceedsWithValue(buf.size()));
   EXPECT_EQ(memcmp(rbuf.data(), buf.data(), buf.size()), 0);
 }
