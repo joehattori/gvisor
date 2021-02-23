@@ -1,4 +1,4 @@
-load("//tools:defs.bzl", "cc_binary", "cc_library", "default_net_util", "gtest", "select_arch", "select_system")
+load("//tools:defs.bzl", "cc_binary", "cc_library", "gtest", "select_arch", "select_system")
 
 package(
     default_visibility = ["//:sandbox"],
@@ -152,18 +152,19 @@ cc_library(
     ],
     hdrs = ["socket_test_util.h"],
     defines = select_system(),
-    deps = default_net_util() + [
+    deps = [
         gtest,
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:optional",
+        "//net/util:ports",
         "//test/util:file_descriptor",
         "//test/util:posix_error",
         "//test/util:temp_path",
         "//test/util:test_util",
         "//test/util:thread_util",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:optional",
     ],
 )
 
