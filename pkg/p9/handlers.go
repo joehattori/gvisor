@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"gvisor.dev/gvisor/pkg/fd"
 	"gvisor.dev/gvisor/pkg/log"
@@ -290,6 +291,8 @@ func CanOpen(mode FileMode) bool {
 
 // handle implements handler.handle.
 func (t *Tlopen) handle(cs *connState) message {
+	start := time.Now()
+	log.Infof("\njoehattori: begin Tlopen.handle() %v %v\n", start, start.UnixNano())
 	ref, ok := cs.LookupFID(t.FID)
 	if !ok {
 		return newErr(syscall.EBADF)
@@ -335,6 +338,9 @@ func (t *Tlopen) handle(cs *connState) message {
 
 	rlopen := &Rlopen{QID: qid, IoUnit: ioUnit}
 	rlopen.SetFilePayload(osFile)
+	end := time.Now()
+	log.Infof("\njoehattori: end Tlopen.handle() %v %v\n", end, end.UnixNano())
+	log.Infof("joehattori: elapsed %v\n", end.UnixNano() - start.UnixNano());
 	return rlopen
 }
 

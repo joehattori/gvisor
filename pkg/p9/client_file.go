@@ -19,6 +19,7 @@ import (
 	"io"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"gvisor.dev/gvisor/pkg/fd"
 	"gvisor.dev/gvisor/pkg/log"
@@ -324,10 +325,15 @@ func (c *clientFile) Open(flags OpenFlags) (*fd.FD, QID, uint32, error) {
 		return nil, QID{}, 0, syscall.EBADF
 	}
 
+	start := time.Now()
+	log.Infof("\njoehattori Open():sending %v %v\n", start, start.UnixNano())
 	rlopen := Rlopen{}
 	if err := c.client.sendRecv(&Tlopen{FID: c.fid, Flags: flags}, &rlopen); err != nil {
 		return nil, QID{}, 0, err
 	}
+	end := time.Now()
+	log.Infof("\njoehattori Open():receiving %v %v\n", end, end.UnixNano())
+	log.Infof("joehattori: elapsed: %v\n", end.UnixNano() - start.UnixNano());
 
 	return rlopen.File, rlopen.QID, rlopen.IoUnit, nil
 }
