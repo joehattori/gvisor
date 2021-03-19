@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/fd"
@@ -325,6 +326,7 @@ func (c *clientFile) Open(flags OpenFlags) (*fd.FD, QID, uint32, error) {
 	}
 
 	rlopen := Rlopen{}
+	log.Infof("\njoehattori: before sendRecv() on Open %v\n", time.Now())
 	if err := c.client.sendRecv(&Tlopen{FID: c.fid, Flags: flags}, &rlopen); err != nil {
 		return nil, QID{}, 0, err
 	}
@@ -535,6 +537,7 @@ func (c *clientFile) Create(name string, openFlags OpenFlags, permissions FileMo
 	}
 
 	rlcreate := Rlcreate{}
+	log.Infof("\njoehattori: before sendRecv() on Create %v\n", time.Now())
 	if err := c.client.sendRecv(&msg, &rlcreate); err != nil {
 		return nil, nil, QID{}, 0, err
 	}
@@ -641,6 +644,7 @@ func (c *clientFile) Mknod(name string, mode FileMode, major uint32, minor uint3
 	}
 
 	rmknod := Rmknod{}
+	log.Infof("\njoehattori: before sendRecv() on Mknod %v\n", time.Now())
 	if err := c.client.sendRecv(&msg, &rmknod); err != nil {
 		return QID{}, err
 	}

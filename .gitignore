@@ -5,3 +5,6 @@
 # Generated repository.
 /repo
 /repo.key
+
+target
+Cargo.lock

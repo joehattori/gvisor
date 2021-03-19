@@ -21,6 +21,7 @@ import (
 	"path"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/fd"
@@ -290,6 +291,7 @@ func CanOpen(mode FileMode) bool {
 
 // handle implements handler.handle.
 func (t *Tlopen) handle(cs *connState) message {
+	log.Infof("joehattori: Tlopen handle %v\n", time.Now())
 	ref, ok := cs.LookupFID(t.FID)
 	if !ok {
 		return newErr(unix.EBADF)
@@ -323,6 +325,7 @@ func (t *Tlopen) handle(cs *connState) message {
 			}
 		}
 
+		log.Infof("joehattori: type on Tlopen handle %T %v\n", ref.file, time.Now())
 		osFile, qid, ioUnit, err = ref.file.Open(t.Flags)
 		return err
 	}); err != nil {
@@ -399,6 +402,7 @@ func (t *Tlcreate) do(cs *connState, uid UID) (*Rlcreate, error) {
 
 // handle implements handler.handle.
 func (t *Tlcreate) handle(cs *connState) message {
+	log.Infof("joehattori: Tlcreate handle %v\n", time.Now())
 	rlcreate, err := t.do(cs, NoUID)
 	if err != nil {
 		return newErr(err)

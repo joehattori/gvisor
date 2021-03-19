@@ -139,6 +139,9 @@ type Client struct {
 //
 // If NewClient succeeds, ownership of socket is transferred to the new Client.
 func NewClient(socket *unet.Socket, messageSize uint32, version string) (*Client, error) {
+	// JOETODO: set `wasmer.Instance` as a field of `client`.
+	// then, set the instance to the field in this function.
+
 	// Need at least one byte of payload.
 	if messageSize <= msgRegistry.largestFixedSize {
 		return nil, &ErrMessageTooLarge{

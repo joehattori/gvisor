@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"time"
 
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/cleanup"
@@ -391,6 +392,7 @@ func setOwnerIfNeeded(fd int, uid p9.UID, gid p9.GID) (unix.Stat_t, error) {
 
 // Open implements p9.File.
 func (l *localFile) Open(flags p9.OpenFlags) (*fd.FD, p9.QID, uint32, error) {
+	log.Infof("joehattori: localFile Open() %v\n", time.Now())
 	if l.isOpen() {
 		panic(fmt.Sprintf("attempting to open already opened file: %q", l.hostPath))
 	}
