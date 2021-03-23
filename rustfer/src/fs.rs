@@ -3,12 +3,13 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use dyn_clone::DynClone;
+use serde::{Deserialize, Serialize};
 
 use crate::message::QID;
 
 pub type FID = u64;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct OpenFlags(u32);
 
 impl OpenFlags {
@@ -32,7 +33,7 @@ impl OpenFlags {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct FileMode(u32);
 
 impl FileMode {
@@ -78,16 +79,38 @@ impl FileMode {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct PathNode {
     child_nodes: HashMap<String, PathNode>,
     child_refs: HashMap<String, FIDRef>,
-    child_ref_names: HashMap<FIDRef, String>,
 }
 
-pub trait File: DynClone {
+impl PathNode {
+    fn get_child_name_from_fid_ref(&self, fid_ref: &FIDRef) -> Option<String> {
+        self.child_refs
+            .iter()
+            .find_map(|(k, v)| if v == fid_ref { Some(k.clone()) } else { None })
+    }
+
+    fn remove_child(&mut self, fid_ref: &FIDRef) {
+        // TODO: mutex
+        if let Some(name) = self.get_child_name_from_fid_ref(fid_ref) {
+            match self.child_refs.remove(&name) {
+                Some(_) => {
+                    if self.child_refs.len() == 0 {
+                        self.child_refs.remove(&name);
+                    }
+                }
+                None => panic!("name {} missing from child_fid_refs", name),
+            }
+        }
+    }
+}
+
+pub trait File: DynClone + Send {
     fn walk(&self, names: [String]) -> Result<Box<(Box<[QID]>, dyn File)>, u32>;
     fn open(&self, flags: OpenFlags) -> Result<(i32, QID, u32), u32>;
+    fn close(&self) -> Result<(), u32>;
 }
 
 pub struct FIDRef {
@@ -97,7 +120,7 @@ pub struct FIDRef {
     pub mode: FileMode,
     pub open_flags: OpenFlags,
     pub path_node: PathNode,
-    pub parent: Box<FIDRef>,
+    pub parent: Option<Box<FIDRef>>,
     pub is_deleted: AtomicBool,
 }
 
@@ -116,9 +139,36 @@ impl Clone for FIDRef {
     }
 }
 
+impl PartialEq for FIDRef {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.file.as_ref(), other.file.as_ref()) // TODO: check
+            && self.refs.load(Ordering::Relaxed) == other.refs.load(Ordering::Relaxed)
+            && self.is_opened == other.is_opened
+            && self.mode == other.mode
+            && self.open_flags == other.open_flags
+            && self.path_node == other.path_node
+            && self.parent == other.parent
+            && self.is_deleted.load(Ordering::Relaxed) == other.is_deleted.load(Ordering::Relaxed)
+    }
+}
+
+impl Eq for FIDRef {}
+
 impl FIDRef {
     pub fn inc_ref(&mut self) {
         self.refs
             .store(self.refs.load(Ordering::Relaxed) + 1, Ordering::Relaxed)
+    }
+
+    pub fn dec_ref(&self) {
+        self.refs
+            .store(self.refs.load(Ordering::Relaxed) - 1, Ordering::Relaxed);
+        if self.refs.load(Ordering::Relaxed) == 0 {
+            self.file.close();
+            if let Some(mut parent) = self.parent.clone() {
+                parent.path_node.remove_child(self);
+                parent.dec_ref();
+            }
+        }
     }
 }
