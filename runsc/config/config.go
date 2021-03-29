@@ -35,152 +35,152 @@ import (
 //
 type Config struct {
 	// RootDir is the runtime root directory.
-	RootDir string `flag:"root"`
+	RootDir string `flag:"root" json:"root_dir"`
 
 	// Traceback changes the Go runtime's traceback level.
-	Traceback string `flag:"traceback"`
+	Traceback string `flag:"traceback" json:"traceback"`
 
 	// Debug indicates that debug logging should be enabled.
-	Debug bool `flag:"debug"`
+	Debug bool `flag:"debug" json:"debug"`
 
 	// LogFilename is the filename to log to, if not empty.
-	LogFilename string `flag:"log"`
+	LogFilename string `flag:"log" json:"log_file_name"`
 
 	// LogFormat is the log format.
-	LogFormat string `flag:"log-format"`
+	LogFormat string `flag:"log-format" json:"log_format"`
 
 	// DebugLog is the path to log debug information to, if not empty.
-	DebugLog string `flag:"debug-log"`
+	DebugLog string `flag:"debug-log" json:"debug_log"`
 
 	// PanicLog is the path to log GO's runtime messages, if not empty.
-	PanicLog string `flag:"panic-log"`
+	PanicLog string `flag:"panic-log" json:"panic_log"`
 
 	// DebugLogFormat is the log format for debug.
-	DebugLogFormat string `flag:"debug-log-format"`
+	DebugLogFormat string `flag:"debug-log-format" json:"debug_log_format"`
 
 	// FileAccess indicates how the filesystem is accessed.
-	FileAccess FileAccessType `flag:"file-access"`
+	FileAccess FileAccessType `flag:"file-access" json:"file_access,int"`
 
 	// Overlay is whether to wrap the root filesystem in an overlay.
-	Overlay bool `flag:"overlay"`
+	Overlay bool `flag:"overlay" json:"overlay"`
 
 	// Verity is whether there's one or more verity file system to mount.
-	Verity bool `flag:"verity"`
+	Verity bool `flag:"verity" json:"verity"`
 
 	// FSGoferHostUDS enables the gofer to mount a host UDS.
-	FSGoferHostUDS bool `flag:"fsgofer-host-uds"`
+	FSGoferHostUDS bool `flag:"fsgofer-host-uds" json:"fs_rustfer_host_uds"`
 
 	// Network indicates what type of network to use.
-	Network NetworkType `flag:"network"`
+	Network NetworkType `flag:"network" json:"network,int"`
 
 	// EnableRaw indicates whether raw sockets should be enabled. Raw
 	// sockets are disabled by stripping CAP_NET_RAW from the list of
 	// capabilities.
-	EnableRaw bool `flag:"net-raw"`
+	EnableRaw bool `flag:"net-raw" json:"enable_raw"`
 
 	// HardwareGSO indicates that hardware segmentation offload is enabled.
-	HardwareGSO bool `flag:"gso"`
+	HardwareGSO bool `flag:"gso" json:"hardware_gso"`
 
 	// SoftwareGSO indicates that software segmentation offload is enabled.
-	SoftwareGSO bool `flag:"software-gso"`
+	SoftwareGSO bool `flag:"software-gso" json:"software_gso"`
 
 	// TXChecksumOffload indicates that TX Checksum Offload is enabled.
-	TXChecksumOffload bool `flag:"tx-checksum-offload"`
+	TXChecksumOffload bool `flag:"tx-checksum-offload" json:"tx_checksum_offload"`
 
 	// RXChecksumOffload indicates that RX Checksum Offload is enabled.
-	RXChecksumOffload bool `flag:"rx-checksum-offload"`
+	RXChecksumOffload bool `flag:"rx-checksum-offload" json:"rx_checksum_offload"`
 
 	// QDisc indicates the type of queuening discipline to use by default
 	// for non-loopback interfaces.
-	QDisc QueueingDiscipline `flag:"qdisc"`
+	QDisc QueueingDiscipline `flag:"qdisc" json:"qdisc,int"`
 
 	// LogPackets indicates that all network packets should be logged.
-	LogPackets bool `flag:"log-packets"`
+	LogPackets bool `flag:"log-packets" json:"log_packets"`
 
 	// Platform is the platform to run on.
-	Platform string `flag:"platform"`
+	Platform string `flag:"platform" json:"platform"`
 
 	// Strace indicates that strace should be enabled.
-	Strace bool `flag:"strace"`
+	Strace bool `flag:"strace" json:"strace"`
 
 	// StraceSyscalls is the set of syscalls to trace (comma-separated values).
 	// If StraceEnable is true and this string is empty, then all syscalls will
 	// be traced.
-	StraceSyscalls string `flag:"strace-syscalls"`
+	StraceSyscalls string `flag:"strace-syscalls" json:"strace_syscalls"`
 
 	// StraceLogSize is the max size of data blobs to display.
-	StraceLogSize uint `flag:"strace-log-size"`
+	StraceLogSize uint `flag:"strace-log-size" json:"strace_log_size"`
 
 	// DisableSeccomp indicates whether seccomp syscall filters should be
 	// disabled. Pardon the double negation, but default to enabled is important.
-	DisableSeccomp bool
+	DisableSeccomp bool `json:"disable_seccomp"`
 
 	// WatchdogAction sets what action the watchdog takes when triggered.
-	WatchdogAction watchdog.Action `flag:"watchdog-action"`
+	WatchdogAction watchdog.Action `flag:"watchdog-action" json:"watchdog_action,int"`
 
 	// PanicSignal registers signal handling that panics. Usually set to
 	// SIGUSR2(12) to troubleshoot hangs. -1 disables it.
-	PanicSignal int `flag:"panic-signal"`
+	PanicSignal int `flag:"panic-signal" json:"panic_signal"`
 
 	// ProfileEnable is set to prepare the sandbox to be profiled.
-	ProfileEnable bool `flag:"profile"`
+	ProfileEnable bool `flag:"profile" json:"profile_enable"`
 
 	// RestoreFile is the path to the saved container image
-	RestoreFile string
+	RestoreFile string `json:"restore_file"`
 
 	// NumNetworkChannels controls the number of AF_PACKET sockets that map
 	// to the same underlying network device. This allows netstack to better
 	// scale for high throughput use cases.
-	NumNetworkChannels int `flag:"num-network-channels"`
+	NumNetworkChannels int `flag:"num-network-channels" json:"num_network_channels"`
 
 	// Rootless allows the sandbox to be started with a user that is not root.
 	// Defense in depth measures are weaker in rootless mode. Specifically, the
 	// sandbox and Gofer process run as root inside a user namespace with root
 	// mapped to the caller's user.
-	Rootless bool `flag:"rootless"`
+	Rootless bool `flag:"rootless" json:"rootless"`
 
 	// AlsoLogToStderr allows to send log messages to stderr.
-	AlsoLogToStderr bool `flag:"alsologtostderr"`
+	AlsoLogToStderr bool `flag:"alsologtostderr" json:"also_log_to_stderr"`
 
 	// ReferenceLeakMode sets reference leak check mode
-	ReferenceLeak refs.LeakMode `flag:"ref-leak-mode"`
+	ReferenceLeak refs.LeakMode `flag:"ref-leak-mode" json:"reference_leak,int"`
 
 	// OverlayfsStaleRead instructs the sandbox to assume that the root mount
 	// is on a Linux overlayfs mount, which does not necessarily preserve
 	// coherence between read-only and subsequent writable file descriptors
 	// representing the "same" file.
-	OverlayfsStaleRead bool `flag:"overlayfs-stale-read"`
+	OverlayfsStaleRead bool `flag:"overlayfs-stale-read" json:"overlayfs_stale_read"`
 
 	// CPUNumFromQuota sets CPU number count to available CPU quota, using
 	// least integer value greater than or equal to quota.
 	//
 	// E.g. 0.2 CPU quota will result in 1, and 1.9 in 2.
-	CPUNumFromQuota bool `flag:"cpu-num-from-quota"`
+	CPUNumFromQuota bool `flag:"cpu-num-from-quota" json:"cpu_num_from_quota"`
 
 	// Enables VFS2.
-	VFS2 bool `flag:"vfs2"`
+	VFS2 bool `flag:"vfs2" json:"vfs2"`
 
 	// Enables FUSE usage.
-	FUSE bool `flag:"fuse"`
+	FUSE bool `flag:"fuse" json:"fuse"`
 
 	// Allows overriding of flags in OCI annotations.
-	AllowFlagOverride bool `flag:"allow-flag-override"`
+	AllowFlagOverride bool `flag:"allow-flag-override" json:"allow_flag_override"`
 
 	// Enables seccomp inside the sandbox.
-	OCISeccomp bool `flag:"oci-seccomp"`
+	OCISeccomp bool `flag:"oci-seccomp" json:"oci_seccomp"`
 
 	// TestOnlyAllowRunAsCurrentUserWithoutChroot should only be used in
 	// tests. It allows runsc to start the sandbox process as the current
 	// user, and without chrooting the sandbox process. This can be
 	// necessary in test environments that have limited capabilities.
-	TestOnlyAllowRunAsCurrentUserWithoutChroot bool `flag:"TESTONLY-unsafe-nonroot"`
+	TestOnlyAllowRunAsCurrentUserWithoutChroot bool `flag:"TESTONLY-unsafe-nonroot" json:"test_only_allow_run_as_current_user_without_chroot"`
 
 	// TestOnlyTestNameEnv should only be used in tests. It looks up for the
 	// test name in the container environment variables and adds it to the debug
 	// log file name. This is done to help identify the log with the test when
 	// multiple tests are run in parallel, since there is no way to pass
 	// parameters to the runtime from docker.
-	TestOnlyTestNameEnv string `flag:"TESTONLY-test-name-env"`
+	TestOnlyTestNameEnv string `flag:"TESTONLY-test-name-env" json:"test_only_test_name_env"`
 }
 
 func (c *Config) validate() error {

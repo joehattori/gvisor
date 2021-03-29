@@ -28,8 +28,8 @@ impl Request for Tlopen {
     fn handle(&self) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
         let cs = ConnState::get().lock().unwrap();
         let mut fid_ref = match cs.lookup_fid(&self.fid) {
-            None => return serde_traitobject::Box::new(Rlerror::new(Rlerror::EBADF)),
             Some(r) => r,
+            None => return serde_traitobject::Box::new(Rlerror::new(Rlerror::EBADF)),
         };
         // TODO: mutex
         if fid_ref.is_deleted.load(Ordering::Relaxed)
