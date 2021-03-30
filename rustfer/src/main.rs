@@ -9,11 +9,7 @@ mod message;
 mod rustfer;
 mod seccomp;
 mod spec_utils;
+mod syscalls;
 mod unix;
 
-fn main() {
-    match ConnState::init() {
-        Ok(_) => (),
-        Err(_) => panic!("ConnState initialized multiple times."),
-    };
-}
+fn main() {}

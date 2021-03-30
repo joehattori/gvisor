@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::{CString, OsStr};
-use std::fs::{self, File};
+use std::fs::{self, File as StdFile};
 use std::io::{self, prelude::*, Error, ErrorKind};
 use std::path::{self, Path};
 use std::sync::{Arc, Mutex};
@@ -10,8 +10,15 @@ use oci_spec::runtime::Mount;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
+use crate::fs::{Attacher, Fd, File, FileMode, LocalFile};
+use crate::message::QID;
 use crate::spec_utils::is_supported_dev_mount;
+use crate::syscalls;
 use crate::unix;
+
+pub const OPEN_FLAGS: u32 = unix::O_NOFOLLOW | unix::O_CLOEXEC;
+pub const INVALID_MODE: u32 = u32::MAX;
+pub const ALLOWED_OPEN_FLAGS: u32 = unix::O_TRUNC;
 
 pub struct Rustfer {
     bundle_dir: String,
@@ -154,7 +161,7 @@ impl Config {
 
 pub fn write_mounts(mounts: &Vec<Mount>) -> io::Result<()> {
     let bytes = serde_json::to_string(mounts).expect("couldn't serialize mounts to json.");
-    let mut file = File::open("mounts file")?;
+    let mut file = StdFile::open("mounts file")?;
     file.write_all(bytes.as_bytes())?;
     Ok(())
 }
@@ -259,8 +266,6 @@ fn adjust_mount_options(
     Ok(ret)
 }
 
-struct Fd(i32);
-
 static PROC_SELF_FD: OnceCell<Mutex<Fd>> = OnceCell::new();
 
 pub fn open_proc_self_fd() -> io::Result<()> {
@@ -285,6 +290,23 @@ pub fn open_proc_self_fd() -> io::Result<()> {
     }
 }
 
+pub fn reopen_proc_fd(f: Fd, mode: i32) -> Result<Fd, u32> {
+    let Fd(fd) = *PROC_SELF_FD.get().unwrap().lock().unwrap();
+    let Fd(f) = f;
+    let ret = libc::openat(
+        fd,
+        f.to_string().as_ptr() as *mut i8,
+        mode & (!unix::O_NOFOLLOW as i32),
+        0,
+    );
+    if ret < 0 {
+        // TODO: return appropriate error
+        Err(0)
+    } else {
+        Ok(Fd(ret))
+    }
+}
+
 pub fn is_read_only_mount(opts: Option<Vec<String>>) -> bool {
     match opts {
         Some(opts) => opts.iter().any(|o| o == "ro"),
@@ -292,9 +314,10 @@ pub fn is_read_only_mount(opts: Option<Vec<String>>) -> bool {
     }
 }
 
+#[derive(Clone)]
 pub struct AttachPoint {
     prefix: String,
-    config: AttachPointConfig,
+    pub config: AttachPointConfig,
     attached: Arc<Mutex<bool>>,
     next_device: Arc<Mutex<u8>>,
     devices: Arc<Mutex<HashMap<u64, u8>>>,
@@ -315,11 +338,131 @@ impl AttachPoint {
             })
         }
     }
+
+    pub fn make_qid(&self, stat: &libc::stat) -> QID {
+        let devices = self.devices.lock().unwrap();
+        let mut next_device = self.next_device.lock().unwrap();
+        let dev = match devices.get(&stat.st_dev) {
+            Some(d) => *d,
+            None => {
+                devices.insert(stat.st_dev, *next_device);
+                let dev = *next_device;
+                *next_device += 1;
+                if *next_device < dev {
+                    panic!("device id overflow! map: {:?}", devices);
+                }
+                dev
+            }
+        };
+        let masked_ino = stat.st_ino & 0x00ffffffffffffff;
+        if masked_ino != stat.st_ino {
+            eprintln!(
+                "first 8 bytes of host inode id {} will be truncated to construct virtual inode id",
+                stat.st_ino
+            );
+        }
+        let ino = (dev as u64) << 56 | masked_ino;
+        QID {
+            typ: FileMode(stat.st_mode).qid_type(),
+            path: ino,
+            version: 0,
+        }
+    }
 }
 
+impl Attacher for AttachPoint {
+    fn attach<'a>(&self) -> Result<Box<dyn File>, &'a str> {
+        let attached = self.attached.lock().unwrap();
+        if *attached {
+            eprintln!("attach point already attached, prefix: {}", self.prefix);
+            return Err("attach point already attached, prefix");
+        }
+        let (f, readable) = match open_any_file(
+            &self.prefix,
+            Box::new(|mode: i32| syscalls::open(&self.prefix, OPEN_FLAGS as i32 | mode, 0)),
+        ) {
+            Ok((Fd(f), readable)) => (f, readable),
+            Err(e) => {
+                eprintln!("unable to open {}: {}", self.prefix, e);
+                return Err("unable to open");
+            }
+        };
+        let stat = match fstat(f) {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("unable to stat {}: {}", self.prefix, e);
+                return Err("unable to stat");
+            }
+        };
+        match LocalFile::new(self, Fd(f), &self.prefix, readable, &stat) {
+            Ok(lf) => {
+                *attached = true;
+                Ok(Box::new(lf))
+            }
+            Err(e) => {
+                eprintln!("unable to create LocalFile {}: {}", self.prefix, e);
+                Err("unable to create LocalFile")
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct AttachPointConfig {
     pub ro_mount: bool,
     pub panic_on_write: bool,
     pub host_uds: bool,
     pub enable_x_attr: bool,
+}
+
+fn open_any_file<'a>(
+    path_debug: &'a str,
+    f: Box<dyn Fn(i32) -> Result<Fd, u32>>,
+) -> Result<(Fd, bool), u32> {
+    struct Op {
+        mode: i32,
+        readable: bool,
+    }
+    let options = [
+        Op {
+            mode: (unix::O_RDONLY | unix::O_NONBLOCK) as i32,
+            readable: true,
+        },
+        Op {
+            mode: unix::O_PATH as i32,
+            readable: true,
+        },
+    ];
+    let mut errno: u32 = 0;
+    for (i, option) in options.iter().enumerate() {
+        match f(option.mode) {
+            Ok(file) => return Ok((file, option.readable)),
+            Err(n) => {
+                errno = n;
+                if errno == unix::ENOENT {
+                    return Err(errno);
+                }
+                println!(
+                    "Attempt {} to open file failed, mode: {}, path: {}, errno: {}",
+                    i,
+                    OPEN_FLAGS | option.mode as u32,
+                    path_debug,
+                    errno
+                );
+            }
+        }
+    }
+    println!("Failed to open file, path: {}, err: {}", path_debug, errno);
+    Err(errno)
+}
+
+fn fstat(fd: i32) -> Result<libc::stat, u32> {
+    let stat: libc::stat = std::mem::zeroed();
+    let res = libc::fstat(fd, &mut stat);
+    if res < 0 {
+        // TODO: return appropriate error
+        Err(0)
+    } else {
+        Ok(stat)
+    }
 }

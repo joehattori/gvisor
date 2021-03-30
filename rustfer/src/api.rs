@@ -1,8 +1,8 @@
 use std::ffi::CStr;
 use std::fs::File;
-use std::mem;
 use std::os::raw::{c_char, c_int, c_void};
 
+use crate::connection::{ConnState, Server};
 use crate::filter::{install, install_uds_filters};
 use crate::message::{Request, Tlopen};
 use crate::rustfer::{
@@ -15,7 +15,7 @@ use crate::spec_utils::{is_external_mount, read_spec_from_file};
 fn rustfer_allocate(size: usize) -> *mut c_void {
     let mut buffer = Vec::with_capacity(size);
     let pointer = buffer.as_mut_ptr();
-    mem::forget(buffer);
+    std::mem::forget(buffer);
 
     pointer as *mut c_void
 }
@@ -157,6 +157,14 @@ fn rustfer_init(
     install().unwrap_or_else(|e| panic!("installing seccomp filters: {}", e));
 }
 
+fn run_server(ats: Vec<AttachPoint>, io_fds: Vec<i32>) {
+    // NEXT
+    for at in ats {
+        let server = Server::new(Box::new(at));
+        let cs = ConnState::new(s, conn);
+    }
+}
+
 #[no_mangle]
 fn rustfer_open(tlopen: *mut c_char) -> *const u8 {
     handle::<Tlopen>(tlopen)
@@ -165,6 +173,8 @@ fn rustfer_open(tlopen: *mut c_char) -> *const u8 {
 fn handle<T: serde_traitobject::Deserialize>(msg: *mut c_char) -> *const u8 {
     let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
     let msg: Tlopen = serde_json::from_str(&msg).unwrap();
-    let res = msg.handle();
+    // TODO: get corresponding ConnState
+    let cs = *ConnState::get().lock().unwrap();
+    let res = msg.handle(cs);
     serde_json::to_string(&res).unwrap().as_ptr()
 }
