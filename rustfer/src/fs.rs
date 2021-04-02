@@ -458,11 +458,20 @@ impl File for LocalFile {
         if mode.is_write_only() || mode.is_read_write() || mode.truncated_flag() != 0 {
             self.check_ro_mount()?;
         }
-        let new_file = if mode.is_read_only() && self.control_readable && flags.os_flags() & OpenFlags::ALLOWED_OPEN_FLAGS == 0 {
-            println!("Open reusing control file, flags: {:?}, {}", flags, self.host_path);
+        let new_file = if mode.is_read_only()
+            && self.control_readable
+            && flags.os_flags() & OpenFlags::ALLOWED_OPEN_FLAGS == 0
+        {
+            println!(
+                "Open reusing control file, flags: {:?}, {}",
+                flags, self.host_path
+            );
             self.file
         } else {
-            println!("Open reopening file, flags: {:?}, {}", flags, self.host_path);
+            println!(
+                "Open reopening file, flags: {:?}, {}",
+                flags, self.host_path
+            );
             let option = fs::OpenOptions::new();
             let std_file = reopen_proc_fd(self.file.unwrap(), &option)?;
             Some(Fd(std_file.as_raw_fd()))

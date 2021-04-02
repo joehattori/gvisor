@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use serde::{Deserialize, Serialize};
 
 use crate::connection::ConnState;
-use crate::fs::{Attr, AttrMask, FIDRef, File, OpenFlags, FID, Fd};
+use crate::fs::{Attr, AttrMask, FIDRef, Fd, File, OpenFlags, FID};
 use crate::unix;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
