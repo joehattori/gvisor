@@ -136,7 +136,7 @@ fn validate_spec(spec: &Spec) -> Result<(), &str> {
 #[derive(Clone)]
 struct Mapping {
     set: bool,
-    val: u32,
+    val: i32,
 }
 
 static OPTIONS_MAP: Lazy<HashMap<&str, Mapping>> = Lazy::new(|| {
@@ -408,7 +408,7 @@ static PROP_OPTIONS_MAP: Lazy<HashMap<&'static str, Mapping>> = Lazy::new(|| {
     .collect()
 });
 
-fn options_to_flags(opts: Vec<&str>, source: &Lazy<HashMap<&str, Mapping>>) -> u32 {
+fn options_to_flags(opts: Vec<&str>, source: &Lazy<HashMap<&str, Mapping>>) -> i32 {
     let mut rv = 0;
     for opt in opts {
         if let Some(m) = source.get(&opt) {

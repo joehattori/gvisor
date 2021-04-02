@@ -9,7 +9,7 @@ use crate::unix;
 
 #[derive(Clone, Copy)]
 enum Rule {
-    EqualTo(u32),
+    EqualTo(i32),
     MatchAny,
 
     Nil,
@@ -28,7 +28,7 @@ impl Rules {
     }
 }
 
-pub type SyscallRules = HashMap<u32, Vec<Rules>>;
+pub type SyscallRules = HashMap<i32, Vec<Rules>>;
 
 pub fn install<'a>() -> Result<(), &'a str> {
     seccomp::install(&*ALLOWED_SYSCALL.lock().unwrap())
@@ -243,11 +243,11 @@ static ALLOWED_SYSCALL: Lazy<Mutex<SyscallRules>> = Lazy::new(|| {
                 ])],
             ),
             (unix::SYS_SYMLINKAT, vec![]),
-            (
-                unix::SYS_TGKILL,
-                // TODO: std::process::id() is not supported on wasm32-wasi.
-                vec![Rules::new(&[Rule::EqualTo(std::process::id())])],
-            ),
+            // (
+            //     unix::SYS_TGKILL,
+            //     // TODO: std::process::id() is not supported on wasm32-wasi.
+            //     vec![Rules::new(&[Rule::EqualTo(std::process::id())])],
+            // ),
             (unix::SYS_UNLINKAT, vec![]),
             (unix::SYS_UTIMENSAT, vec![]),
             (unix::SYS_WRITE, vec![]),

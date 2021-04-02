@@ -6,8 +6,8 @@ use crate::connection::{ConnState, Server};
 use crate::filter::{install, install_uds_filters};
 use crate::message::{Request, Tlopen};
 use crate::rustfer::{
-    is_read_only_mount, open_proc_self_fd, resolve_mounts, write_mounts, AttachPoint,
-    AttachPointConfig, Config, Rustfer,
+    is_read_only_mount, resolve_mounts, write_mounts, AttachPoint, AttachPointConfig, Config,
+    Rustfer,
 };
 use crate::spec_utils::{is_external_mount, read_spec_from_file};
 
@@ -96,7 +96,7 @@ fn rustfer_init(
 
     // in gVisor, unix.Umask(0) is performed but this should be unneeded in wasi.
 
-    open_proc_self_fd().unwrap_or_else(|e| panic!("failed to open /proc/self/fd: {}", e));
+    // open_proc_self_fd().unwrap_or_else(|e| panic!("failed to open /proc/self/fd: {}", e));
 
     // in gVisor, unix.Chroot(root) and unix.Chdir("/") is performed but this should be unneeded in wasi.
     let mut ats = Vec::new();
@@ -167,12 +167,12 @@ fn run_server(ats: Vec<AttachPoint>, io_fds: Vec<i32>) {
 
 #[no_mangle]
 fn rustfer_open(tlopen: *mut c_char) -> *const u8 {
-    handle::<Tlopen>(tlopen)
+    let msg = unsafe { CStr::from_ptr(tlopen) }.to_str().unwrap();
+    let msg = serde_json::from_str(&msg).unwrap();
+    handle::<Tlopen>(msg)
 }
 
-fn handle<T: serde_traitobject::Deserialize>(msg: *mut c_char) -> *const u8 {
-    let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
-    let msg: Tlopen = serde_json::from_str(&msg).unwrap();
+fn handle<T: serde_traitobject::Deserialize + Request>(msg: T) -> *const u8 {
     // TODO: get corresponding ConnState
     let cs = *ConnState::get().lock().unwrap();
     let res = msg.handle(cs);

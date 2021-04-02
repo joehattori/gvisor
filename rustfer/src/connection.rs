@@ -31,11 +31,21 @@ impl ConnState {
             fid_ref.clone()
         })
     }
+
+    pub fn insert_fid(&self, fid: &FID, new_ref: &FIDRef) {
+        let mut fids = self.fids.lock().unwrap();
+        let orig = fids.get(&fid);
+        new_ref.inc_ref();
+        fids.insert(*fid, *new_ref);
+        if let Some(orig) = orig {
+            orig.dec_ref();
+        }
+    }
 }
 
 pub struct Server {
-    attacher: Box<dyn Attacher>,
-    path_tree: PathNode,
+    pub attacher: Box<dyn Attacher>,
+    pub path_tree: PathNode,
 }
 
 impl Server {
@@ -43,6 +53,15 @@ impl Server {
         Server {
             attacher: attacher,
             path_tree: PathNode::new(),
+        }
+    }
+}
+
+impl Clone for Server {
+    fn clone(&self) -> Self {
+        Server {
+            attacher: dyn_clone::clone_box(&*self.attacher),
+            path_tree: self.path_tree.clone(),
         }
     }
 }

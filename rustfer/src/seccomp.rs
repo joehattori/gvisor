@@ -12,7 +12,7 @@ pub fn install<'a>(rules: &SyscallRules) -> Result<(), &'a str> {
     Ok(())
 }
 
-fn default_action<'a>() -> Result<u32, &'a str> {
+fn default_action<'a>() -> Result<i32, &'a str> {
     let available = is_kill_process_available()?;
     if available {
         Ok(linux::SECCOMP_RET_KILL_PROCESS)

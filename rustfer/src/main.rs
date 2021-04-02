@@ -1,4 +1,4 @@
-use crate::connection::ConnState;
+#![feature(wasi_ext)]
 
 mod api;
 mod connection;
@@ -9,7 +9,6 @@ mod message;
 mod rustfer;
 mod seccomp;
 mod spec_utils;
-mod syscalls;
 mod unix;
 
 fn main() {}

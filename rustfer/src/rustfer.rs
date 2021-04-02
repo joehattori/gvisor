@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::ffi::{CString, OsStr};
+use std::ffi::OsStr;
 use std::fs::{self, File as StdFile};
-use std::io::{self, prelude::*, Error, ErrorKind};
+use std::io::{self, prelude::*};
+use std::os::wasi::prelude::*;
 use std::path::{self, Path};
 use std::sync::{Arc, Mutex};
 
@@ -10,15 +11,13 @@ use oci_spec::runtime::Mount;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
-use crate::fs::{Attacher, Fd, File, FileMode, LocalFile};
-use crate::message::QID;
+use crate::fs::{Attacher, Fd, File, LocalFile};
+use crate::message::{QIDType, QID};
 use crate::spec_utils::is_supported_dev_mount;
-use crate::syscalls;
 use crate::unix;
 
-pub const OPEN_FLAGS: u32 = unix::O_NOFOLLOW | unix::O_CLOEXEC;
-pub const INVALID_MODE: u32 = u32::MAX;
-pub const ALLOWED_OPEN_FLAGS: u32 = unix::O_TRUNC;
+pub const OPEN_FLAGS: i32 = unix::O_NOFOLLOW | unix::O_CLOEXEC;
+pub const ALLOWED_OPEN_FLAGS: i32 = unix::O_TRUNC;
 
 pub struct Rustfer {
     bundle_dir: String,
@@ -266,46 +265,29 @@ fn adjust_mount_options(
     Ok(ret)
 }
 
-static PROC_SELF_FD: OnceCell<Mutex<Fd>> = OnceCell::new();
-
-pub fn open_proc_self_fd() -> io::Result<()> {
-    let path = CString::new("/proc/self/fd").unwrap();
-    let fd = unsafe {
-        libc::open(
-            path.as_ptr(),
-            (unix::O_RDONLY | unix::O_DIRECTORY) as i32,
-            0,
-        )
-    };
-    if fd < 0 {
-        Err(Error::new(ErrorKind::Other, "error opening /proc/self/fd"))
-    } else {
-        match PROC_SELF_FD.set(Mutex::new(Fd(fd))) {
-            Ok(_) => Ok(()),
-            Err(_) => Err(Error::new(
-                ErrorKind::Other,
-                "failed to set to PROC_SELF_FD.",
-            )),
-        }
-    }
-}
-
-pub fn reopen_proc_fd(f: Fd, mode: i32) -> Result<Fd, u32> {
-    let Fd(fd) = *PROC_SELF_FD.get().unwrap().lock().unwrap();
-    let Fd(f) = f;
-    let ret = libc::openat(
-        fd,
-        f.to_string().as_ptr() as *mut i8,
-        mode & (!unix::O_NOFOLLOW as i32),
-        0,
-    );
-    if ret < 0 {
-        // TODO: return appropriate error
-        Err(0)
-    } else {
-        Ok(Fd(ret))
-    }
-}
+// static PROC_SELF_FD: OnceCell<Mutex<Fd>> = OnceCell::new();
+//
+// pub fn open_proc_self_fd() -> io::Result<()> {
+//     let path = CString::new("/proc/self/fd").unwrap();
+//     let fd = unsafe {
+//         libc::open(
+//             path.as_ptr(),
+//             (unix::O_RDONLY | unix::O_DIRECTORY) as i32,
+//             0,
+//         )
+//     };
+//     if fd < 0 {
+//         Err(Error::new(ErrorKind::Other, "error opening /proc/self/fd"))
+//     } else {
+//         match PROC_SELF_FD.set(Mutex::new(Fd(fd))) {
+//             Ok(_) => Ok(()),
+//             Err(_) => Err(Error::new(
+//                 ErrorKind::Other,
+//                 "failed to set to PROC_SELF_FD.",
+//             )),
+//         }
+//     }
+// }
 
 pub fn is_read_only_mount(opts: Option<Vec<String>>) -> bool {
     match opts {
@@ -339,13 +321,13 @@ impl AttachPoint {
         }
     }
 
-    pub fn make_qid(&self, stat: &libc::stat) -> QID {
+    pub fn make_qid(&self, metadata: fs::Metadata) -> QID {
         let devices = self.devices.lock().unwrap();
         let mut next_device = self.next_device.lock().unwrap();
-        let dev = match devices.get(&stat.st_dev) {
+        let dev = match devices.get(&metadata.dev()) {
             Some(d) => *d,
             None => {
-                devices.insert(stat.st_dev, *next_device);
+                devices.insert(metadata.dev(), *next_device);
                 let dev = *next_device;
                 *next_device += 1;
                 if *next_device < dev {
@@ -354,16 +336,17 @@ impl AttachPoint {
                 dev
             }
         };
-        let masked_ino = stat.st_ino & 0x00ffffffffffffff;
-        if masked_ino != stat.st_ino {
+        let ino = metadata.ino();
+        let masked_ino = ino & 0x00ffffffffffffff;
+        if masked_ino != ino {
             eprintln!(
                 "first 8 bytes of host inode id {} will be truncated to construct virtual inode id",
-                stat.st_ino
+                ino
             );
         }
         let ino = (dev as u64) << 56 | masked_ino;
         QID {
-            typ: FileMode(stat.st_mode).qid_type(),
+            typ: QIDType::from_file_type(metadata.file_type()),
             path: ino,
             version: 0,
         }
@@ -371,43 +354,51 @@ impl AttachPoint {
 }
 
 impl Attacher for AttachPoint {
-    fn attach<'a>(&self) -> Result<Box<dyn File>, &'a str> {
+    fn attach(&self) -> io::Result<Box<dyn File>> {
         let attached = self.attached.lock().unwrap();
         if *attached {
-            eprintln!("attach point already attached, prefix: {}", self.prefix);
-            return Err("attach point already attached, prefix");
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("attach point already attached, prefix: {}", self.prefix),
+            ));
         }
-        let (f, readable) = match open_any_file(
+        let prefix = self.prefix;
+        let (raw_fd, readable) = open_any_file(
             &self.prefix,
-            Box::new(|mode: i32| syscalls::open(&self.prefix, OPEN_FLAGS as i32 | mode, 0)),
-        ) {
-            Ok((Fd(f), readable)) => (f, readable),
-            Err(e) => {
-                eprintln!("unable to open {}: {}", self.prefix, e);
-                return Err("unable to open");
-            }
-        };
-        let stat = match fstat(f) {
-            Ok(res) => res,
-            Err(e) => {
-                eprintln!("unable to stat {}: {}", self.prefix, e);
-                return Err("unable to stat");
-            }
-        };
-        match LocalFile::new(self, Fd(f), &self.prefix, readable, &stat) {
+            Box::new(|option: &fs::OpenOptions| option.open(prefix)),
+        )
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("unable to open {}: {}", self.prefix, e),
+            )
+        })?;
+        match LocalFile::new(self, Fd(raw_fd), &self.prefix, readable) {
             Ok(lf) => {
                 *attached = true;
                 Ok(Box::new(lf))
             }
-            Err(e) => {
-                eprintln!("unable to create LocalFile {}: {}", self.prefix, e);
-                Err("unable to create LocalFile")
-            }
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("unable to create LocalFile {}: {}", self.prefix, e),
+            )),
         }
     }
 }
 
-#[derive(Clone)]
+impl PartialEq for AttachPoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.prefix == other.prefix
+            && self.config == other.config
+            && *self.attached.lock().unwrap() == *other.attached.lock().unwrap()
+            && *self.next_device.lock().unwrap() == *other.next_device.lock().unwrap()
+            && *self.devices.lock().unwrap() == *other.devices.lock().unwrap()
+    }
+}
+
+impl Eq for AttachPoint {}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct AttachPointConfig {
     pub ro_mount: bool,
     pub panic_on_write: bool,
@@ -415,53 +406,74 @@ pub struct AttachPointConfig {
     pub enable_x_attr: bool,
 }
 
-fn open_any_file<'a>(
-    path_debug: &'a str,
-    f: Box<dyn Fn(i32) -> Result<Fd, u32>>,
-) -> Result<(Fd, bool), u32> {
-    struct Op {
-        mode: i32,
-        readable: bool,
+fn join(parent: &str, child: &str) -> String {
+    if child == "." || child == ".." {
+        panic!("invalid child path {}", child)
+    } else {
+        format!("{}/{}", parent, child)
     }
-    let options = [
-        Op {
-            mode: (unix::O_RDONLY | unix::O_NONBLOCK) as i32,
-            readable: true,
-        },
-        Op {
-            mode: unix::O_PATH as i32,
-            readable: true,
-        },
-    ];
-    let mut errno: u32 = 0;
-    for (i, option) in options.iter().enumerate() {
-        match f(option.mode) {
-            Ok(file) => return Ok((file, option.readable)),
-            Err(n) => {
-                errno = n;
-                if errno == unix::ENOENT {
-                    return Err(errno);
-                }
-                println!(
-                    "Attempt {} to open file failed, mode: {}, path: {}, errno: {}",
-                    i,
-                    OPEN_FLAGS | option.mode as u32,
-                    path_debug,
-                    errno
-                );
-            }
-        }
-    }
-    println!("Failed to open file, path: {}, err: {}", path_debug, errno);
-    Err(errno)
 }
 
-fn fstat(fd: i32) -> Result<libc::stat, u32> {
+pub fn open_any_file_from_parent(
+    parent: &LocalFile,
+    name: &str,
+) -> io::Result<(RawFd, String, bool)> {
+    let file_path = join(&parent.host_path, name);
+    let (raw_fd, readable) = open_any_file(
+        &file_path,
+        Box::new(|option: &fs::OpenOptions| option.open(file_path)),
+    )?;
+    Ok((raw_fd, file_path, readable))
+}
+
+pub fn open_any_file<'a>(
+    path_debug: &'a str,
+    f: Box<dyn Fn(&fs::OpenOptions) -> io::Result<StdFile>>,
+) -> io::Result<(RawFd, bool)> {
+    #[derive(Debug)]
+    struct Mode<'a> {
+        open_option: &'a fs::OpenOptions,
+        readable: bool,
+    }
+    let mode = Mode {
+        open_option: fs::OpenOptions::new().read(true),
+        readable: true,
+    };
+    if let Ok(file) = f(mode.open_option) {
+        return Ok((file.as_raw_fd(), mode.readable));
+    }
+    match f(mode.open_option) {
+        Ok(file) => return Ok((file.as_raw_fd(), mode.readable)),
+        Err(err) => {
+            println!(
+                "Attempt to open file failed, mode: {:?}, path: {}, err: {}",
+                mode, path_debug, err
+            );
+        }
+    };
+    let mode = Mode {
+        open_option: &fs::OpenOptions::new(),
+        readable: false,
+    };
+    match f(mode.open_option) {
+        Ok(file) => Ok((file.as_raw_fd(), mode.readable)),
+        Err(err) => {
+            println!("Failed to open file, path: {}, err: {}", path_debug, err);
+            Err(err)
+        }
+    }
+}
+
+pub fn reopen_proc_fd(fd: Fd, option: &fs::OpenOptions) -> io::Result<StdFile> {
+    option.open(format!("/proc/self/fd/{}", fd.fd().to_string()))
+}
+
+pub fn fstat(fd: Fd) -> io::Result<libc::stat> {
     let stat: libc::stat = std::mem::zeroed();
-    let res = libc::fstat(fd, &mut stat);
+    let res = libc::fstat(fd.fd() as i32, &mut stat);
     if res < 0 {
         // TODO: return appropriate error
-        Err(0)
+        Err(io::Error::from_raw_os_error(unix::EBADF))
     } else {
         Ok(stat)
     }
