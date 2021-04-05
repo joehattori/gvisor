@@ -32,17 +32,16 @@ impl ConnState {
         })
     }
 
-    pub fn insert_fid(&self, fid: &FID, new_ref: &FIDRef) {
-        let mut fids = self.fids.lock().unwrap();
-        let orig = fids.get(&fid);
+    pub fn insert_fid(&self, fid: &FID, new_ref: &mut FIDRef) {
         new_ref.inc_ref();
-        fids.insert(*fid, *new_ref);
-        if let Some(orig) = orig {
+        let mut fids = self.fids.lock().unwrap();
+        if let Some(mut orig) = fids.insert(*fid, new_ref.clone()) {
             orig.dec_ref();
         }
     }
 }
 
+// NEXT: think about Server!
 pub struct Server {
     pub attacher: Box<dyn Attacher>,
     pub path_tree: PathNode,

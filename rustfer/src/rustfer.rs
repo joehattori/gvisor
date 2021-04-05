@@ -296,7 +296,7 @@ pub fn is_read_only_mount(opts: Option<Vec<String>>) -> bool {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct AttachPoint {
     prefix: String,
     pub config: AttachPointConfig,
@@ -322,7 +322,7 @@ impl AttachPoint {
     }
 
     pub fn make_qid(&self, metadata: fs::Metadata) -> QID {
-        let devices = self.devices.lock().unwrap();
+        let mut devices = self.devices.lock().unwrap();
         let mut next_device = self.next_device.lock().unwrap();
         let dev = match devices.get(&metadata.dev()) {
             Some(d) => *d,
@@ -355,24 +355,17 @@ impl AttachPoint {
 
 impl Attacher for AttachPoint {
     fn attach(&self) -> io::Result<Box<dyn File>> {
-        let attached = self.attached.lock().unwrap();
+        let mut attached = self.attached.lock().unwrap();
         if *attached {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 format!("attach point already attached, prefix: {}", self.prefix),
             ));
         }
-        let prefix = self.prefix;
-        let (raw_fd, readable) = open_any_file(
-            &self.prefix,
-            Box::new(|option: &fs::OpenOptions| option.open(prefix)),
-        )
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("unable to open {}: {}", self.prefix, e),
-            )
-        })?;
+        let prefix = self.prefix.to_owned();
+        let (raw_fd, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
+            option.open(&prefix)
+        }))?;
         match LocalFile::new(self, Fd(raw_fd), &self.prefix, readable) {
             Ok(lf) => {
                 *attached = true;
@@ -398,7 +391,7 @@ impl PartialEq for AttachPoint {
 
 impl Eq for AttachPoint {}
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct AttachPointConfig {
     pub ro_mount: bool,
     pub panic_on_write: bool,
@@ -419,15 +412,14 @@ pub fn open_any_file_from_parent(
     name: &str,
 ) -> io::Result<(RawFd, String, bool)> {
     let file_path = join(&parent.host_path, name);
-    let (raw_fd, readable) = open_any_file(
-        &file_path,
-        Box::new(|option: &fs::OpenOptions| option.open(file_path)),
-    )?;
+    let cloned = file_path.to_owned();
+    let (raw_fd, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
+        option.open(&cloned)
+    }))?;
     Ok((raw_fd, file_path, readable))
 }
 
 pub fn open_any_file<'a>(
-    path_debug: &'a str,
     f: Box<dyn Fn(&fs::OpenOptions) -> io::Result<StdFile>>,
 ) -> io::Result<(RawFd, bool)> {
     #[derive(Debug)]
@@ -435,42 +427,45 @@ pub fn open_any_file<'a>(
         open_option: &'a fs::OpenOptions,
         readable: bool,
     }
-    let mode = Mode {
-        open_option: fs::OpenOptions::new().read(true),
-        readable: true,
-    };
-    if let Ok(file) = f(mode.open_option) {
-        return Ok((file.as_raw_fd(), mode.readable));
+    let mut op = fs::OpenOptions::new();
+
+    let modes = [
+        Mode {
+            open_option: op.read(true),
+            readable: true,
+        },
+        Mode {
+            open_option: &fs::OpenOptions::new(),
+            readable: false,
+        },
+    ];
+    let mut error = io::Error::new(io::ErrorKind::Other, "");
+    for mode in modes.iter() {
+        match f(mode.open_option) {
+            Ok(file) => return Ok((file.as_raw_fd(), mode.readable)),
+            Err(err) => {
+                if err.raw_os_error() == Some(unix::ENOENT) {
+                    return Err(err);
+                }
+                error = err;
+                println!(
+                    "Attempt to open file failed, mode: {:?}, err: {}",
+                    mode, error
+                );
+            }
+        };
     }
-    match f(mode.open_option) {
-        Ok(file) => return Ok((file.as_raw_fd(), mode.readable)),
-        Err(err) => {
-            println!(
-                "Attempt to open file failed, mode: {:?}, path: {}, err: {}",
-                mode, path_debug, err
-            );
-        }
-    };
-    let mode = Mode {
-        open_option: &fs::OpenOptions::new(),
-        readable: false,
-    };
-    match f(mode.open_option) {
-        Ok(file) => Ok((file.as_raw_fd(), mode.readable)),
-        Err(err) => {
-            println!("Failed to open file, path: {}, err: {}", path_debug, err);
-            Err(err)
-        }
-    }
+    println!("Attempt to open file failed, err: {}", error);
+    Err(error)
 }
 
-pub fn reopen_proc_fd(fd: Fd, option: &fs::OpenOptions) -> io::Result<StdFile> {
+pub fn reopen_proc_fd(fd: &Fd, option: &fs::OpenOptions) -> io::Result<StdFile> {
     option.open(format!("/proc/self/fd/{}", fd.fd().to_string()))
 }
 
 pub fn fstat(fd: Fd) -> io::Result<libc::stat> {
-    let stat: libc::stat = std::mem::zeroed();
-    let res = libc::fstat(fd.fd() as i32, &mut stat);
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    let res = unsafe { libc::fstat(fd.fd() as i32, &mut stat) };
     if res < 0 {
         // TODO: return appropriate error
         Err(io::Error::from_raw_os_error(unix::EBADF))

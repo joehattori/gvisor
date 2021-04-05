@@ -26,5 +26,5 @@ pub const FUTEX_OP_CMP_LE: i32 = 3;
 pub const FUTEX_OP_CMP_GT: i32 = 4;
 pub const FUTEX_OP_CMP_GE: i32 = 5;
 
-pub const SECCOMP_RET_KILL_PROCESS: i32 = 0x80000000;
-pub const SECCOMP_RET_TRAP: i32 = 0x00030000;
+pub const SECCOMP_RET_KILL_PROCESS: u32 = 0x80000000;
+pub const SECCOMP_RET_TRAP: u32 = 0x00030000;

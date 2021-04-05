@@ -10,7 +10,7 @@ use crate::connection::ConnState;
 use crate::fs::{Attr, AttrMask, FIDRef, Fd, File, OpenFlags, FID};
 use crate::unix;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct QIDType(pub u8);
 
 impl QIDType {
@@ -46,7 +46,7 @@ type UID = u32;
 
 const NO_FID: u64 = u32::MAX as u64;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct QID {
     pub typ: QIDType,
     pub version: u32,
@@ -54,7 +54,7 @@ pub struct QID {
 }
 
 pub trait Request {
-    fn handle(&self, cs: ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any>;
+    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any>;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,8 +64,7 @@ pub struct Tlopen {
 }
 
 impl Request for Tlopen {
-    fn handle(&self, cs: ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
-        let cs = ConnState::get().lock().unwrap();
+    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
         let mut fid_ref = match cs.lookup_fid(&self.fid) {
             Some(r) => r,
             None => return serde_traitobject::Box::new(Rlerror::new(unix::EBADF)),
@@ -111,7 +110,7 @@ pub struct Tauth {
 
 impl Request for Tauth {
     // We don't support authentication, so this just returns ENOSYS.
-    fn handle(&self, cs: ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
         serde_traitobject::Box::new(Rlerror::new(unix::ENOSYS))
     }
 }
@@ -127,14 +126,14 @@ fn errno_to_serde_traitobject(errno: i32) -> serde_traitobject::Box<dyn serde_tr
 }
 
 impl Request for Tattach {
-    fn handle(&self, cs: ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
         if self.auth.authentication_fid != NO_FID {
             return errno_to_serde_traitobject(unix::EINVAL);
         }
         if Path::new(&self.auth.attach_name).is_absolute() {
             self.auth.attach_name = self.auth.attach_name[1..].to_string();
         }
-        let file = match cs.server.attacher.attach() {
+        let mut file = match cs.server.attacher.attach() {
             Ok(f) => f,
             Err(errno) => return errno_to_serde_traitobject(extract_errno(errno)),
         };
@@ -149,27 +148,27 @@ impl Request for Tattach {
             file.close();
             return errno_to_serde_traitobject(unix::EINVAL);
         }
-        let root = FIDRef {
+        let mut root = FIDRef {
             is_deleted: AtomicBool::new(false),
             is_opened: false,
             open_flags: OpenFlags(0),
             file: file,
             parent: None,
-            server: cs.server,
+            server: cs.server.clone(),
             refs: AtomicI64::new(1),
             mode: attr.file_mode.file_type(),
-            path_node: cs.server.path_tree,
+            path_node: cs.server.path_tree.clone(),
         };
         if self.auth.attach_name.is_empty() {
-            cs.insert_fid(&self.fid, &root);
+            cs.insert_fid(&self.fid, &mut root);
             return serde_traitobject::Box::new(Rattach { qid });
         }
-        let (_, new_ref, _, _) = match do_walk(&cs, root, &Path::new(&self.auth.attach_name), false)
-        {
-            Ok(v) => v,
-            Err(e) => return errno_to_serde_traitobject(extract_errno(e)),
-        };
-        cs.insert_fid(&self.fid, &new_ref);
+        let (_, mut new_ref, _, _) =
+            match do_walk(&cs, root, &Path::new(&self.auth.attach_name), false) {
+                Ok(v) => v,
+                Err(e) => return errno_to_serde_traitobject(extract_errno(e)),
+            };
+        cs.insert_fid(&self.fid, &mut new_ref);
         new_ref.dec_ref();
         serde_traitobject::Box::new(Rattach { qid })
     }
@@ -193,7 +192,6 @@ fn do_walk(
     getattr: bool,
 ) -> io::Result<(Vec<QID>, FIDRef, AttrMask, Attr)> {
     let mut qids = Vec::new();
-    let mut new_ref = None;
     let mut valid = AttrMask::default();
     let mut attr = Attr::default();
     for name in path.iter() {
@@ -205,32 +203,29 @@ fn do_walk(
     }
     if path.iter().collect::<Vec<_>>().len() == 0 {
         // TODO: safelyRead()
-        let (qids_, sf, valid_, attr_) = walk_one(vec![], rf.file, vec![], getattr)?;
-        qids = qids_;
+        let (_, sf, valid_, attr_) = walk_one(vec![], rf.clone().file, vec![], getattr)?;
         valid = valid_;
         attr = attr_;
-        new_ref = Some(FIDRef {
+        let mut fid_ref = FIDRef {
             is_opened: false,
             open_flags: OpenFlags(0),
             refs: AtomicI64::new(0),
-            server: cs.server,
-            parent: rf.parent,
+            server: cs.server.clone(),
+            parent: rf.parent.clone(),
             file: sf,
-            mode: rf.mode,
-            path_node: rf.path_node,
+            mode: rf.mode.clone(),
+            path_node: rf.path_node.clone(),
             is_deleted: AtomicBool::new(rf.is_deleted()),
-        });
+        };
         if !rf.is_root() {
-            if !new_ref.unwrap().is_deleted() {
-                rf.parent.unwrap().path_node.add_child(
-                    &new_ref.unwrap(),
-                    &rf.parent.unwrap().path_node.name_for(&rf),
-                )
+            if !fid_ref.is_deleted() {
+                let name = &rf.clone().parent.unwrap().path_node.name_for(&rf);
+                rf.add_child_to_parent(&fid_ref, name);
             }
             rf.parent.unwrap().inc_ref();
         }
-        new_ref.unwrap().inc_ref();
-        return Ok((vec![], new_ref.unwrap(), valid, attr));
+        fid_ref.inc_ref();
+        return Ok((vec![], fid_ref, valid, attr));
     }
     let mut walk_ref = rf;
     walk_ref.inc_ref();
@@ -241,27 +236,27 @@ fn do_walk(
         }
         // TODO: safelyRead
         let name = name.to_str().unwrap();
-        let (qids_, sf, valid_, attr_) =
-            walk_one(qids, walk_ref.file, vec![name], true).map_err(|e| {
+        let (qids_, sf, valid_, attr_) = walk_one(qids, walk_ref.clone().file, vec![name], true)
+            .map_err(|e| {
                 walk_ref.dec_ref();
                 e
             })?;
         qids = qids_;
         valid = valid_;
         attr = attr_;
-        new_ref = Some(FIDRef {
+        let new_ref = FIDRef {
             is_deleted: AtomicBool::new(false),
             is_opened: false,
             open_flags: OpenFlags(0),
             refs: AtomicI64::new(0),
-            server: cs.server,
-            parent: Some(Box::new(walk_ref)),
+            server: cs.server.clone(),
+            parent: Some(Box::new(walk_ref.clone())),
             file: sf,
-            mode: attr.file_mode,
+            mode: attr.file_mode.clone(),
             path_node: walk_ref.path_node.path_node_for(name),
-        });
-        walk_ref.path_node.add_child(&new_ref.unwrap(), name);
-        walk_ref = new_ref.unwrap();
+        };
+        walk_ref.path_node.add_child(&new_ref, name);
+        walk_ref = new_ref;
         walk_ref.inc_ref();
     }
     Ok((qids, walk_ref, valid, attr))
@@ -279,7 +274,7 @@ fn walk_one(
     let mut local_qids = Vec::new();
     let mut valid = AttrMask::default();
     let mut attr = Attr::default();
-    let sf = if getattr {
+    let mut sf = if getattr {
         // TODO: if err != unix::ENOSYS
         match from.walk_get_attr(names) {
             Ok(v) => {
@@ -293,7 +288,7 @@ fn walk_one(
     } else {
         let res = from.walk(names)?;
         local_qids = res.0;
-        let sf = res.1;
+        let mut sf = res.1;
         if getattr {
             match sf.get_attr(AttrMask::mask_all()) {
                 Ok(res) => {

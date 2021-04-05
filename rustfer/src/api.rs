@@ -157,12 +157,11 @@ fn rustfer_init(
     install().unwrap_or_else(|e| panic!("installing seccomp filters: {}", e));
 }
 
-fn run_server(ats: Vec<AttachPoint>, io_fds: Vec<i32>) {
-    // NEXT
-    for at in ats {
-        let server = Server::new(Box::new(at));
-        let cs = ConnState::new(s, conn);
-    }
+fn configure_server(ats: Vec<AttachPoint>, io_fds: Vec<i32>) {
+    // for at in ats {
+    //     let server = Server::new(Box::new(at));
+    //     let cs = ConnState::new(s, conn);
+    // }
 }
 
 #[no_mangle]
@@ -172,9 +171,9 @@ fn rustfer_open(tlopen: *mut c_char) -> *const u8 {
     handle::<Tlopen>(msg)
 }
 
-fn handle<T: serde_traitobject::Deserialize + Request>(msg: T) -> *const u8 {
+fn handle<T: serde_traitobject::Deserialize + Request>(mut msg: T) -> *const u8 {
     // TODO: get corresponding ConnState
-    let cs = *ConnState::get().lock().unwrap();
+    let cs = &*ConnState::get().lock().unwrap();
     let res = msg.handle(cs);
     serde_json::to_string(&res).unwrap().as_ptr()
 }

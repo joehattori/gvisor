@@ -66,7 +66,7 @@ impl OpenFlags {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Default)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct FileMode(pub u32);
 
 impl FileMode {
@@ -165,14 +165,14 @@ impl PathNode {
     fn remove_child(&mut self, fid_ref: &FIDRef) {
         // TODO: mutex
         if let Some(name) = self.get_child_name_from_fid_ref(fid_ref) {
-            match self.child_refs.lock().unwrap().remove(&name) {
-                Some(_) => {
-                    let child_refs = self.child_refs.lock().unwrap();
-                    if child_refs.len() == 0 {
-                        child_refs.remove(&name);
-                    }
-                }
-                None => panic!("name {} missing from child_fid_refs", name),
+            self.child_refs
+                .lock()
+                .unwrap()
+                .remove(&name)
+                .expect(&format!("name {} missing from child_fid_refs", name));
+            let mut child_refs = self.child_refs.lock().unwrap();
+            if child_refs.len() == 0 {
+                child_refs.remove(&name);
             }
         }
     }
@@ -184,7 +184,7 @@ impl PathNode {
         self.child_refs
             .lock()
             .unwrap()
-            .insert(name.to_string(), *rf);
+            .insert(name.to_string(), rf.clone());
     }
 
     pub fn name_for(&self, rf: &FIDRef) -> String {
@@ -195,18 +195,18 @@ impl PathNode {
     pub fn path_node_for(&self, name: &str) -> Self {
         {
             if let Some(pn) = self.child_nodes.lock().unwrap().get(name) {
-                return *pn;
+                return pn.clone();
             }
         }
 
         // Slow path, create a new pathNode for shared use.
-        let child_nodes = self.child_nodes.lock().unwrap();
+        let mut child_nodes = self.child_nodes.lock().unwrap();
 
         if let Some(pn) = child_nodes.get(name) {
-            return *pn;
+            return pn.clone();
         }
         let pn = PathNode::new();
-        child_nodes.insert(name.to_string(), pn);
+        child_nodes.insert(name.to_string(), pn.clone());
         pn
     }
 }
@@ -220,7 +220,7 @@ impl PartialEq for PathNode {
 
 impl Eq for PathNode {}
 
-pub trait Attacher: DynClone {
+pub trait Attacher: DynClone + Send {
     fn attach(&self) -> io::Result<Box<dyn File>>;
 }
 
@@ -287,8 +287,8 @@ impl AttrMask {
 
 pub trait File: DynClone + Send {
     fn walk(&self, names: Vec<&str>) -> io::Result<(Vec<QID>, Box<dyn File>)>;
-    fn open(&self, flags: OpenFlags) -> io::Result<(Option<Fd>, QID, u32)>;
-    fn close(&self) -> io::Result<()>;
+    fn open(&mut self, flags: OpenFlags) -> io::Result<(Option<Fd>, QID, u32)>;
+    fn close(&mut self) -> io::Result<()>;
     fn get_attr(&self, mask: AttrMask) -> io::Result<(QID, AttrMask, Attr)>;
     fn walk_get_attr(
         &self,
@@ -296,7 +296,7 @@ pub trait File: DynClone + Send {
     ) -> io::Result<(Vec<QID>, Box<dyn File>, AttrMask, Attr)>;
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fd(pub RawFd);
 impl Fd {
     pub fn fd(&self) -> u32 {
@@ -322,13 +322,12 @@ pub struct LocalFile {
 }
 
 impl LocalFile {
-    pub fn new(a: &AttachPoint, fd: Fd, path: &str, readable: bool) -> Result<Self, u32> {
+    pub fn new(a: &AttachPoint, fd: Fd, path: &str, readable: bool) -> io::Result<Self> {
         // TODO: checkSupportedFileType
-        let std_file = unsafe { StdFile::from_raw_fd(fd.fd()) };
         let file = fd.into_file();
         let metadata = file.metadata().unwrap();
         Ok(LocalFile {
-            attach_point: *a,
+            attach_point: a.clone(),
             host_path: path.to_string(),
             file: Some(fd),
             mode: OpenFlags::invalid_mode(),
@@ -393,18 +392,16 @@ impl LocalFile {
 
     fn walk(&self, names: Vec<&str>) -> io::Result<(Vec<QID>, Box<dyn File>, libc::stat)> {
         if names.is_empty() {
-            let file = self.file.unwrap();
-            let (raw_fd, readable) = open_any_file(
-                &self.host_path,
-                Box::new(|option: &fs::OpenOptions| reopen_proc_fd(file, option)),
-            )?;
+            let file = self.file.unwrap().to_owned();
+            let (raw_fd, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
+                reopen_proc_fd(&file, option)
+            }))?;
             let fd = Fd(raw_fd);
             let file = fd.into_file();
-            let stat =
-                fstat(fd).map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to fstat"))?;
+            let stat = fstat(fd)?;
             let c = LocalFile {
-                attach_point: self.attach_point,
-                host_path: self.host_path,
+                attach_point: self.attach_point.clone(),
+                host_path: self.host_path.clone(),
                 file: Some(fd),
                 mode: OpenFlags::invalid_mode(),
                 file_type: self.file_type,
@@ -412,33 +409,32 @@ impl LocalFile {
                 control_readable: readable,
                 last_dir_offset: 0,
             };
-            return Ok((vec![c.qid], Box::new(c), stat));
+            let qid = c.qid.clone();
+            return Ok((vec![qid], Box::new(c), stat));
         }
-        let mut last = self;
-        let mut last_stat: libc::stat = std::mem::zeroed();
+        let mut last = self.clone();
+        let mut last_stat: libc::stat = unsafe { std::mem::zeroed() };
         let mut qids = Vec::new();
         for name in names {
-            let (raw_fd, path, readable) = open_any_file_from_parent(last, name)?;
-            if last != self {
+            let (raw_fd, path, readable) = open_any_file_from_parent(&last, name)?;
+            if &last != self {
                 last.close();
             }
             let fd = Fd(raw_fd);
             let file = fd.into_file();
             last_stat = fstat(fd).map_err(|e| {
                 // f.close();
-                // TODO: extractErrno
-                io::Error::new(io::ErrorKind::Other, "unix::EINVAL")
+                e
             })?;
-            // NEXT
-            let c = LocalFile::new(&last.attach_point, fd, &path, readable).map_err(|e| {
+            let ap = &last.attach_point;
+            let c = LocalFile::new(ap, fd, &path, readable).map_err(|e| {
                 // f.close();
-                // TODO: extractErrno
-                io::Error::new(io::ErrorKind::Other, "unix::EINVAL")
+                e
             })?;
-            qids.push(c.qid);
-            last = &c;
+            last = c.clone();
+            qids.push(c.qid.clone());
         }
-        Ok((qids, Box::new(*last), last_stat))
+        Ok((qids, Box::new(last), last_stat))
     }
 }
 
@@ -450,7 +446,7 @@ impl File for LocalFile {
         }
     }
 
-    fn open(&self, flags: OpenFlags) -> io::Result<(Option<Fd>, QID, u32)> {
+    fn open(&mut self, flags: OpenFlags) -> io::Result<(Option<Fd>, QID, u32)> {
         if self.is_open() {
             panic!("attempting to open already opened file: {}", self.host_path);
         }
@@ -473,7 +469,7 @@ impl File for LocalFile {
                 flags, self.host_path
             );
             let option = fs::OpenOptions::new();
-            let std_file = reopen_proc_fd(self.file.unwrap(), &option)?;
+            let std_file = reopen_proc_fd(&self.file.unwrap(), &option)?;
             Some(Fd(std_file.as_raw_fd()))
         };
 
@@ -492,7 +488,7 @@ impl File for LocalFile {
         Ok((fd, self.qid, 0))
     }
 
-    fn close(&self) -> io::Result<()> {
+    fn close(&mut self) -> io::Result<()> {
         self.mode = OpenFlags::invalid_mode();
         self.file = None;
         Ok(())
@@ -533,7 +529,7 @@ impl FIDRef {
             .store(self.refs.load(Ordering::Relaxed) + 1, Ordering::Relaxed)
     }
 
-    pub fn dec_ref(&self) {
+    pub fn dec_ref(&mut self) {
         self.refs
             .store(self.refs.load(Ordering::Relaxed) - 1, Ordering::Relaxed);
         if self.refs.load(Ordering::Relaxed) == 0 {
@@ -545,16 +541,19 @@ impl FIDRef {
         }
     }
 
-    pub fn maybe_parent(&self) -> Self {
-        *self.parent.unwrap_or_else(|| Box::new(*self))
-    }
-
     pub fn is_root(&self) -> bool {
         self.parent.is_none()
     }
 
     pub fn is_deleted(&self) -> bool {
         self.is_deleted.load(Ordering::Relaxed)
+    }
+
+    pub fn add_child_to_parent(&self, rf: &FIDRef, name: &str) {
+        match self.parent {
+            Some(ref parent) => parent.path_node.add_child(rf, name),
+            None => eprintln!("no parent node when add_child_to_parent."),
+        }
     }
 }
 
