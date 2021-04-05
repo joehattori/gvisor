@@ -18,7 +18,7 @@ impl QIDType {
     pub const APPEND_ONLY: Self = QIDType(0x40);
     pub const EXCLUSIVE: Self = QIDType(0x20);
     pub const MOUNT: Self = QIDType(0x10);
-    pub const Auth: Self = QIDType(0x08);
+    pub const AUTH: Self = QIDType(0x08);
     pub const TEMPORARY: Self = QIDType(0x04);
     pub const SYMLINK: Self = QIDType(0x02);
     pub const LINK: Self = QIDType(0x01);
