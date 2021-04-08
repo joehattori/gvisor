@@ -1,7 +1,9 @@
-use std::collections::HashMap;
-use std::fs::{self, File as StdFile};
+use std::cmp;
+use std::collections::{BTreeSet, HashMap};
+use std::fs::{self as stdfs, File as StdFile};
 use std::io;
 use std::os::wasi::prelude::*;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -9,7 +11,7 @@ use dyn_clone::DynClone;
 use serde::{Deserialize, Serialize};
 
 use crate::connection::Server;
-use crate::message::{QIDType, QID};
+use crate::message::{QIDType, GID, QID, UID};
 use crate::rustfer::{
     fstat, open_any_file, open_any_file_from_parent, reopen_proc_fd, AttachPoint,
 };
@@ -66,13 +68,13 @@ impl OpenFlags {
     }
 }
 
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FileMode(pub u32);
 
 impl FileMode {
     const MASK: u32 = 0170000;
 
-    const REGULAR: u32 = 0100000;
+    pub const REGULAR: u32 = 0100000;
     const DIRECTORY: u32 = 040000;
     const NAMED_PIPE: u32 = 010000;
     const BLOCK_DEVICE: u32 = 060000;
@@ -136,12 +138,16 @@ impl FileMode {
             || self.is_block_dev()
             || self.is_char_dev()
     }
+
+    pub fn regular() -> Self {
+        FileMode(Self::REGULAR)
+    }
 }
 
 #[derive(Clone)]
 pub struct PathNode {
     child_nodes: Arc<Mutex<HashMap<String, PathNode>>>,
-    child_refs: Arc<Mutex<HashMap<String, FIDRef>>>,
+    child_refs: Arc<Mutex<HashMap<String, BTreeSet<FIDRef>>>>,
 }
 
 impl PathNode {
@@ -153,13 +159,11 @@ impl PathNode {
     }
 
     fn get_child_name_from_fid_ref(&self, fid_ref: &FIDRef) -> Option<String> {
-        self.child_refs.lock().unwrap().iter().find_map(|(k, v)| {
-            if v == fid_ref {
-                Some(k.clone())
-            } else {
-                None
-            }
-        })
+        self.child_refs
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|(k, v)| v.get(fid_ref).map(|_| k.clone()))
     }
 
     fn remove_child(&mut self, fid_ref: &FIDRef) {
@@ -181,10 +185,9 @@ impl PathNode {
         if let Some(n) = self.get_child_name_from_fid_ref(rf) {
             panic!("unexpected FIDRef with path {}, wanted {}", n, name);
         }
-        self.child_refs
-            .lock()
-            .unwrap()
-            .insert(name.to_string(), rf.clone());
+        let mut bt = BTreeSet::new();
+        bt.insert(rf.clone());
+        self.child_refs.lock().unwrap().insert(name.to_string(), bt);
     }
 
     pub fn name_for(&self, rf: &FIDRef) -> String {
@@ -208,6 +211,34 @@ impl PathNode {
         let pn = PathNode::new();
         child_nodes.insert(name.to_string(), pn.clone());
         pn
+    }
+
+    pub fn remove_with_name(&self, name: &str, f: Box<dyn Fn(&FIDRef)>) -> Option<PathNode> {
+        let mut child_refs = self.child_refs.lock().unwrap();
+        if let Some(m) = child_refs.get_mut(name) {
+            for rf in m.clone().iter() {
+                m.remove(rf);
+                f(rf)
+            }
+        }
+        let mut child_nodes = self.child_nodes.lock().unwrap();
+        child_nodes.remove(name)
+    }
+
+    fn for_each_child_ref(&self, f: Box<dyn Fn(&FIDRef, &str)>) {
+        let child_refs = self.child_refs.lock().unwrap();
+        for (name, m) in child_refs.iter() {
+            for rf in m.iter() {
+                f(rf, name)
+            }
+        }
+    }
+
+    fn for_each_child_node(&self, f: Box<dyn Fn(&PathNode)>) {
+        let child_nodes = self.child_nodes.lock().unwrap();
+        for pn in child_nodes.values() {
+            f(pn)
+        }
     }
 }
 
@@ -285,15 +316,102 @@ impl AttrMask {
     }
 }
 
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+pub struct SetAttrMask {
+    permissions: bool,
+    uid: bool,
+    gid: bool,
+    size: bool,
+    a_time: bool,
+    m_time: bool,
+    c_time: bool,
+    a_time_not_system_time: bool,
+    m_time_not_system_time: bool,
+}
+
+impl SetAttrMask {
+    fn is_empty(&self) -> bool {
+        !self.permissions
+            && !self.uid
+            && !self.gid
+            && !self.size
+            && !self.a_time
+            && !self.m_time
+            && !self.c_time
+            && !self.a_time_not_system_time
+            && !self.m_time_not_system_time
+    }
+
+    fn is_subset_of(&self, m: SetAttrMask) -> bool {
+        let self_bm = self.bitmask();
+        let m_bm = m.bitmask();
+        m_bm | self_bm == m_bm
+    }
+
+    fn bitmask(&self) -> u32 {
+        let mut mask = 0;
+        if self.permissions {
+            mask |= 0x00000001
+        }
+        if self.uid {
+            mask |= 0x00000002
+        }
+        if self.gid {
+            mask |= 0x00000004
+        }
+        if self.size {
+            mask |= 0x00000008
+        }
+        if self.a_time {
+            mask |= 0x00000010
+        }
+        if self.m_time {
+            mask |= 0x00000020
+        }
+        if self.c_time {
+            mask |= 0x00000040
+        }
+        if self.a_time_not_system_time {
+            mask |= 0x00000080
+        }
+        if self.m_time_not_system_time {
+            mask |= 0x00000100
+        }
+        mask
+    }
+}
+
+#[derive(Copy, Clone, Serialize, Deserialize)]
+pub struct SetAttr {
+    permissions: FileMode,
+    uid: UID,
+    gid: GID,
+    size: u64,
+    a_time_seconds: u64,
+    a_time_nanoseconds: u64,
+    m_time_seconds: u64,
+    m_time_nanoseconds: u64,
+}
+
 pub trait File: DynClone + Send {
     fn walk(&self, names: Vec<&str>) -> io::Result<(Vec<QID>, Box<dyn File>)>;
     fn open(&mut self, flags: OpenFlags) -> io::Result<(Option<Fd>, QID, u32)>;
     fn close(&mut self) -> io::Result<()>;
+    fn create(
+        &self,
+        name: &str,
+        flags: OpenFlags,
+        perm: FileMode,
+        uid: UID,
+        gid: GID,
+    ) -> io::Result<(Option<Fd>, Box<dyn File>, QID, u32)>;
     fn get_attr(&self, mask: AttrMask) -> io::Result<(QID, AttrMask, Attr)>;
+    fn set_attr(&self, valid: SetAttrMask, attr: SetAttr) -> io::Result<()>;
     fn walk_get_attr(
         &self,
         names: Vec<&str>,
     ) -> io::Result<(Vec<QID>, Box<dyn File>, AttrMask, Attr)>;
+    fn unlink_at(&self, name: &str, flag: i32) -> io::Result<()>;
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -316,7 +434,7 @@ pub struct LocalFile {
     file: Option<Fd>,
     control_readable: bool,
     mode: OpenFlags,
-    file_type: fs::FileType,
+    file_type: stdfs::FileType,
     qid: QID,
     last_dir_offset: u64,
 }
@@ -393,9 +511,10 @@ impl LocalFile {
     fn walk(&self, names: Vec<&str>) -> io::Result<(Vec<QID>, Box<dyn File>, libc::stat)> {
         if names.is_empty() {
             let file = self.file.unwrap().to_owned();
-            let (raw_fd, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
-                reopen_proc_fd(&file, option)
-            }))?;
+            let (raw_fd, readable) =
+                open_any_file(Box::new(move |option: &stdfs::OpenOptions| {
+                    reopen_proc_fd(&file, option)
+                }))?;
             let fd = Fd(raw_fd);
             let file = fd.into_file();
             let stat = fstat(fd)?;
@@ -468,7 +587,7 @@ impl File for LocalFile {
                 "Open reopening file, flags: {:?}, {}",
                 flags, self.host_path
             );
-            let option = fs::OpenOptions::new();
+            let option = stdfs::OpenOptions::new();
             let std_file = reopen_proc_fd(&self.file.unwrap(), &option)?;
             Some(Fd(std_file.as_raw_fd()))
         };
@@ -494,11 +613,147 @@ impl File for LocalFile {
         Ok(())
     }
 
-    fn get_attr(&self, mask: AttrMask) -> io::Result<(QID, AttrMask, Attr)> {
+    fn create(
+        &self,
+        name: &str,
+        flags: OpenFlags,
+        perm: FileMode,
+        uid: UID,
+        gid: GID,
+    ) -> io::Result<(Option<Fd>, Box<dyn File>, QID, u32)> {
+        self.check_ro_mount()?;
+        let mode = OpenFlags(flags.os_flags() & OpenFlags::MASK);
+        let path = Path::new(&self.host_path).join(name);
+        // TODO: handle permisson with OpenOption.
+        let child = StdFile::create(path.to_str().unwrap())?;
+        let metadata = child.metadata()?;
+        // TODO: setOwnerIfNeeded()
+        let c = LocalFile {
+            attach_point: self.attach_point.clone(),
+            host_path: path.to_str().unwrap().to_string(),
+            file: Some(Fd(child.as_raw_fd())),
+            mode: mode,
+            file_type: metadata.file_type(),
+            qid: self.attach_point.make_qid(metadata),
+            control_readable: false,
+            last_dir_offset: 0,
+        };
+        let qid = c.qid;
+        // TODO: newFDMaybe
+        Ok((c.file, Box::new(c), qid, 0))
+    }
+
+    fn get_attr(&self, _mask: AttrMask) -> io::Result<(QID, AttrMask, Attr)> {
         let file = self.file.unwrap();
         let stat = fstat(file)?;
         let (mask, attr) = self.fill_attr(&stat);
         Ok((self.qid, mask, attr))
+    }
+
+    fn set_attr(&self, valid: SetAttrMask, attr: SetAttr) -> io::Result<()> {
+        self.check_ro_mount()?;
+        let allowed = SetAttrMask {
+            permissions: true,
+            uid: true,
+            gid: true,
+            size: true,
+            a_time: true,
+            m_time: true,
+            c_time: false,
+            a_time_not_system_time: true,
+            m_time_not_system_time: true,
+        };
+        if valid.is_empty() {
+            return Ok(());
+        }
+        if !valid.is_subset_of(allowed) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("SetAttr() failed for {}, mask: {:?}", self.host_path, valid),
+            ));
+        }
+        let perform_close =
+            self.file_type.is_file() && !self.mode.is_write_only() && !self.mode.is_read_write();
+        let file = if perform_close {
+            let std_file =
+                reopen_proc_fd(&self.file.unwrap(), stdfs::OpenOptions::new().write(true))?;
+            Some(Fd(std_file.as_raw_fd()))
+        } else {
+            self.file
+        };
+        let mut ret = Ok(());
+        if valid.permissions {
+            panic!("SetAttr fchmod is currently not supported.");
+        }
+        if valid.size {
+            let mut std_file = file.unwrap().into_file();
+            std_file.set_len(attr.size)?;
+        }
+
+        if valid.a_time || valid.m_time {
+            let mut utimes = [
+                libc::timespec {
+                    tv_sec: 0,
+                    tv_nsec: unix::UTIME_OMIT,
+                },
+                libc::timespec {
+                    tv_sec: 0,
+                    tv_nsec: unix::UTIME_OMIT,
+                },
+            ];
+            if valid.a_time {
+                if valid.a_time_not_system_time {
+                    utimes[0].tv_sec = attr.a_time_seconds as i64;
+                    utimes[0].tv_nsec = attr.a_time_nanoseconds as i32;
+                } else {
+                    utimes[0].tv_nsec = unix::UTIME_NOW;
+                }
+            }
+            if valid.m_time {
+                if valid.m_time_not_system_time {
+                    utimes[1].tv_sec = attr.m_time_seconds as i64;
+                    utimes[1].tv_nsec = attr.m_time_nanoseconds as i32;
+                } else {
+                    utimes[1].tv_nsec = unix::UTIME_NOW;
+                }
+            }
+
+            if self.file_type.is_symlink() {
+                let std_file = StdFile::open(self.host_path.clone())?;
+                let fd = std_file.as_raw_fd();
+                let res = unsafe { libc::futimens(fd as i32, utimes.as_ptr()) };
+                if res < 0 {
+                    ret = Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("SetAttr utimens failed {}", self.host_path),
+                    ));
+                }
+            } else {
+                let res = unsafe { libc::futimens(file.unwrap().fd() as i32, utimes.as_ptr()) };
+                if res < 0 {
+                    ret = Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("SetAttr utimens failed {}", self.host_path),
+                    ));
+                }
+            }
+        }
+
+        if valid.uid || valid.gid {
+            // let uid = if valid.uid {
+            //     attr.uid
+            // } else {
+            //     NO_UID
+            // };
+            // let gid = if valid.gid {
+            //     attr.gid
+            // } else {
+            //     NO_GID
+            // };
+            panic!("SetAttr fchown not supported yet.");
+        }
+
+        ret
     }
 
     fn walk_get_attr(
@@ -508,6 +763,22 @@ impl File for LocalFile {
         let (qids, file, stat) = self.walk(names)?;
         let (mask, attr) = self.fill_attr(&stat);
         Ok((qids, file, mask, attr))
+    }
+
+    fn unlink_at(&self, name: &str, flag: i32) -> io::Result<()> {
+        self.check_ro_mount()?;
+        let res = unsafe {
+            libc::unlinkat(
+                self.file.unwrap().fd() as i32,
+                name.as_ptr() as *const i8,
+                flag,
+            )
+        };
+        if res < 0 {
+            Err(io::Error::new(io::ErrorKind::Other, "unlink_at failed"))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -555,6 +826,27 @@ impl FIDRef {
             None => eprintln!("no parent node when add_child_to_parent."),
         }
     }
+
+    pub fn mark_child_deleted(&self, name: &str) {
+        let orig_path_node = self.path_node.remove_with_name(
+            name,
+            Box::new(|rf: &FIDRef| rf.is_deleted.store(true, Ordering::Relaxed)),
+        );
+        if let Some(orig_path_node) = orig_path_node {
+            notify_delete(&orig_path_node)
+        }
+    }
+
+    pub fn add_child_to_path_node(&self, r: &Self, name: &str) {
+        self.path_node.add_child(r, name)
+    }
+}
+
+fn notify_delete(pn: &PathNode) {
+    pn.for_each_child_ref(Box::new(|rf: &FIDRef, _: &str| {
+        rf.is_deleted.store(true, Ordering::Relaxed)
+    }));
+    pn.for_each_child_node(Box::new(|pn: &PathNode| notify_delete(pn)));
 }
 
 impl Clone for FIDRef {
@@ -587,3 +879,15 @@ impl PartialEq for FIDRef {
 }
 
 impl Eq for FIDRef {}
+
+impl PartialOrd for FIDRef {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.mode.cmp(&other.mode))
+    }
+}
+
+impl Ord for FIDRef {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.mode.cmp(&other.mode)
+    }
+}

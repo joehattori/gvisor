@@ -2,9 +2,9 @@ use std::ffi::CStr;
 use std::fs::File;
 use std::os::raw::{c_char, c_int, c_void};
 
-use crate::connection::{ConnState, Server};
+use crate::connection::ConnState;
 use crate::filter::{install, install_uds_filters};
-use crate::message::{Request, Tlopen};
+use crate::message::{handle, Request, Tattach, Tlopen};
 use crate::rustfer::{
     is_read_only_mount, resolve_mounts, write_mounts, AttachPoint, AttachPointConfig, Config,
     Rustfer,
@@ -171,9 +171,9 @@ fn rustfer_open(tlopen: *mut c_char) -> *const u8 {
     handle::<Tlopen>(msg)
 }
 
-fn handle<T: serde_traitobject::Deserialize + Request>(mut msg: T) -> *const u8 {
-    // TODO: get corresponding ConnState
-    let cs = &*ConnState::get().lock().unwrap();
-    let res = msg.handle(cs);
-    serde_json::to_string(&res).unwrap().as_ptr()
+#[no_mangle]
+fn rustfer_attach(tattach: *mut c_char) -> *const u8 {
+    let msg = unsafe { CStr::from_ptr(tattach) }.to_str().unwrap();
+    let msg = serde_json::from_str(&msg).unwrap();
+    handle::<Tattach>(msg)
 }

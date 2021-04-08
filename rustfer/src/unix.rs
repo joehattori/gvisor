@@ -31,6 +31,8 @@ pub const O_NOFOLLOW: i32 = 0x20000;
 pub const O_CLOEXEC: i32 = 0x80000;
 pub const O_TRUNC: i32 = 0x200;
 pub const O_ACCMODE: i32 = 0x3;
+pub const O_CREAT: i32 = 0x40;
+pub const O_EXCL: i32 = 0x80;
 
 pub const SYS_READ: i32 = 0;
 pub const SYS_WRITE: i32 = 1;
@@ -125,3 +127,6 @@ pub const EACCESS: i32 = 0xd;
 pub const EIO: i32 = 0x5;
 
 pub const S_IFMT: i32 = 0xf000;
+
+pub const UTIME_NOW: i32 = 0x3fffffff;
+pub const UTIME_OMIT: i32 = 0x3ffffffe;

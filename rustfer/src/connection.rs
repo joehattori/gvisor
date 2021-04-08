@@ -39,6 +39,17 @@ impl ConnState {
             orig.dec_ref();
         }
     }
+
+    pub fn delete_fid(&self, fid: &FID) -> bool {
+        let mut fids = self.fids.lock().unwrap();
+        match fids.remove(fid) {
+            Some(mut rf) => {
+                rf.dec_ref();
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 // NEXT: think about Server!

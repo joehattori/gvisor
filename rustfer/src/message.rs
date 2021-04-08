@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use serde::{Deserialize, Serialize};
 
 use crate::connection::ConnState;
-use crate::fs::{Attr, AttrMask, FIDRef, Fd, File, OpenFlags, FID};
+use crate::fs::{Attr, AttrMask, FIDRef, Fd, File, FileMode, OpenFlags, SetAttr, SetAttrMask, FID};
 use crate::unix;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -42,15 +42,25 @@ impl QIDType {
     }
 }
 
-type UID = u32;
+pub type UID = u32;
+pub type GID = u32;
 
 const NO_FID: u64 = u32::MAX as u64;
+pub const NO_UID: u32 = u32::MAX;
+// pub const NO_GID: u32 = u32::MAX;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct QID {
     pub typ: QIDType,
     pub version: u32,
     pub path: u64,
+}
+
+pub fn handle<T: serde_traitobject::Deserialize + Request>(mut msg: T) -> *const u8 {
+    // TODO: get corresponding ConnState
+    let cs = &*ConnState::get().lock().unwrap();
+    let res = msg.handle(cs);
+    serde_json::to_string(&res).unwrap().as_ptr()
 }
 
 pub trait Request {
@@ -116,13 +126,96 @@ impl Request for Tauth {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct Tclunk {
+    fid: FID,
+}
+
+impl Request for Tclunk {
+    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+        if !cs.delete_fid(&self.fid) {
+            serde_traitobject::Box::new(Rlerror::new(unix::EBADF))
+        } else {
+            serde_traitobject::Box::new(Rclunk {})
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Tsetattrclunk {
+    fid: FID,
+    valid: SetAttrMask,
+    set_attr: SetAttr,
+}
+
+impl Request for Tsetattrclunk {
+    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+        match cs.lookup_fid(&self.fid) {
+            None => errno_to_serde_traitobject(unix::EBADF),
+            Some(mut rf) => {
+                // TODO: safetyWrite
+                let set_attr_res = if rf.is_deleted() {
+                    Err(Rlerror::new(unix::EINVAL))
+                } else {
+                    rf.file
+                        .set_attr(self.valid, self.set_attr)
+                        .map_err(|e| Rlerror::new(extract_errno(e)))
+                };
+                rf.dec_ref();
+                if !cs.delete_fid(&self.fid) {
+                    errno_to_serde_traitobject(unix::EBADF)
+                } else {
+                    match set_attr_res {
+                        Ok(_) => serde_traitobject::Box::new(Rsetattrclunk {}),
+                        Err(e) => serde_traitobject::Box::new(e),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Tremove {
+    fid: FID,
+}
+
+impl Request for Tremove {
+    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+        match cs.lookup_fid(&self.fid) {
+            None => errno_to_serde_traitobject(unix::EBADF),
+            Some(rf) => {
+                // TODO: safelyGlobal
+                let res = if rf.is_root() || rf.is_deleted() {
+                    Err(Rlerror::new(unix::EINVAL))
+                } else {
+                    let cloned = rf.clone();
+                    let parent = rf.parent.unwrap();
+                    let name = parent.path_node.name_for(&cloned);
+                    match parent.file.unlink_at(&name, 0) {
+                        Ok(_) => {
+                            parent.mark_child_deleted(&name);
+                            Ok(())
+                        }
+                        Err(e) => Err(Rlerror::new(extract_errno(e))),
+                    }
+                };
+                if !cs.delete_fid(&self.fid) {
+                    errno_to_serde_traitobject(unix::EBADF)
+                } else {
+                    match res {
+                        Ok(_) => serde_traitobject::Box::new(Rremove {}),
+                        Err(e) => serde_traitobject::Box::new(e),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Tattach {
     fid: FID,
     auth: Tauth,
-}
-
-fn errno_to_serde_traitobject(errno: i32) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
-    serde_traitobject::Box::new(Rlerror::new(errno))
 }
 
 impl Request for Tattach {
@@ -312,13 +405,82 @@ fn walk_one(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct Tlcreate {
+    fid: FID,
+    name: String,
+    open_flags: OpenFlags,
+    permissions: FileMode,
+    gid: GID,
+}
+
+impl Tlcreate {
+    fn perform(&self, cs: &ConnState, uid: UID) -> Result<Rlcreate, i32> {
+        check_safe_name(&self.name).map_err(|_| unix::EINVAL)?;
+        let mut rf = match cs.lookup_fid(&self.fid) {
+            Some(rf) => rf,
+            None => {
+                return Err(unix::EBADF);
+            }
+        };
+        // TODO: safelyWrite
+        if rf.is_deleted() || !rf.mode.is_dir() || rf.is_opened {
+            rf.dec_ref();
+            Err(unix::EINVAL)
+        } else {
+            match rf
+                .file
+                .create(&self.name, self.open_flags, self.permissions, uid, self.gid)
+            {
+                Ok((os_file, nsf, qid, io_unit)) => {
+                    let path_node = rf.path_node.path_node_for(&self.name);
+                    let mut new_ref = FIDRef {
+                        server: cs.server.clone(),
+                        parent: Some(Box::new(rf.clone())),
+                        file: nsf,
+                        is_opened: true,
+                        open_flags: self.open_flags,
+                        mode: FileMode::regular(),
+                        path_node: path_node,
+                        is_deleted: AtomicBool::new(false),
+                        refs: AtomicI64::new(0),
+                    };
+                    rf.add_child_to_path_node(&new_ref, &self.name);
+                    rf.inc_ref();
+                    cs.insert_fid(&self.fid, &mut new_ref);
+                    let file = None;
+                    let mut rlcreate = Rlcreate {
+                        rlopen: Rlopen { qid, io_unit, file },
+                    };
+                    rlcreate.set_file_payload(os_file);
+                    Ok(rlcreate)
+                }
+                Err(err) => {
+                    rf.dec_ref();
+                    Err(extract_errno(err))
+                }
+            }
+        }
+    }
+}
+
+impl Request for Tlcreate {
+    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+        let rlcreate = match self.perform(cs, NO_UID) {
+            Ok(rlcreate) => rlcreate,
+            Err(e) => return errno_to_serde_traitobject(e),
+        };
+        serde_traitobject::Box::new(rlcreate)
+    }
+}
+
 pub trait Response: serde_traitobject::Serialize + serde_traitobject::Deserialize {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rlopen {
     qid: QID,
     io_unit: u32,
-    fd: Option<Fd>,
+    file: Option<Fd>,
 }
 
 impl Rlopen {
@@ -326,23 +488,45 @@ impl Rlopen {
         Rlopen {
             qid,
             io_unit,
-            fd: None,
+            file: None,
         }
     }
 
     pub fn set_file_payload(&mut self, fd: Option<Fd>) {
-        self.fd = fd;
+        self.file = fd;
     }
 }
 
 impl Response for Rlopen {}
 
 #[derive(Serialize, Deserialize)]
+pub struct Rclunk {}
+impl Response for Rclunk {}
+
+#[derive(Serialize, Deserialize)]
+pub struct Rsetattrclunk {}
+impl Response for Rsetattrclunk {}
+
+#[derive(Serialize, Deserialize)]
+pub struct Rremove {}
+impl Response for Rremove {}
+
+#[derive(Serialize, Deserialize)]
 pub struct Rattach {
     qid: QID,
 }
-
 impl Response for Rattach {}
+
+#[derive(Serialize, Deserialize)]
+pub struct Rlcreate {
+    rlopen: Rlopen,
+}
+impl Response for Rlcreate {}
+impl Rlcreate {
+    fn set_file_payload(&mut self, fd: Option<Fd>) {
+        self.rlopen.set_file_payload(fd)
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rlerror {
@@ -359,4 +543,8 @@ impl Response for Rlerror {}
 
 fn extract_errno(err: Error) -> i32 {
     err.raw_os_error().unwrap_or(unix::EIO)
+}
+
+fn errno_to_serde_traitobject(errno: i32) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+    serde_traitobject::Box::new(Rlerror::new(errno))
 }
