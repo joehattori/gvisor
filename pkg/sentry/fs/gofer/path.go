@@ -131,6 +131,7 @@ func (i *inodeOperations) Create(ctx context.Context, dir *fs.Inode, name string
 	}
 
 	owner := fs.FileOwnerFromContext(ctx)
+	// JOETODO: construct hostFile from path. rustfer cannot duplicate fd properly.
 	hostFile, err := newFile.create(ctx, name, openFlags, p9.FileMode(perm.LinuxMode()), p9.UID(owner.UID), p9.GID(owner.GID))
 	if err != nil {
 		// Could not create the file.
@@ -331,6 +332,7 @@ func (i *inodeOperations) createEndpointFile(ctx context.Context, dir *fs.Inode,
 	// Create a regular file in the gofer and then mark it as a socket by
 	// adding this inode key in the 'overrides' map.
 	owner := fs.FileOwnerFromContext(ctx)
+	// JOETODO: construct hostFile from path. rustfer cannot duplicate fd properly.
 	hostFile, err := dirClone.create(ctx, name, p9.ReadWrite, p9.FileMode(perm.LinuxMode()), p9.UID(owner.UID), p9.GID(owner.GID))
 	if err != nil {
 		return fs.StableAttr{}, nil, err
