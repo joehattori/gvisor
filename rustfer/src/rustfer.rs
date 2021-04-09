@@ -11,7 +11,7 @@ use oci_spec::runtime::Mount;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
-use crate::fs::{Attacher, Fd, File, LocalFile};
+use crate::fs::{Attacher, File, LocalFile};
 use crate::message::{QIDType, QID};
 use crate::spec_utils::is_supported_dev_mount;
 use crate::unix;
@@ -363,10 +363,10 @@ impl Attacher for AttachPoint {
             ));
         }
         let prefix = self.prefix.to_owned();
-        let (raw_fd, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
+        let (file, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
             option.open(&prefix)
         }))?;
-        match LocalFile::new(self, Fd(raw_fd), &self.prefix, readable) {
+        match LocalFile::new(self, file, &self.prefix, readable) {
             Ok(lf) => {
                 *attached = true;
                 Ok(Box::new(lf))
@@ -410,18 +410,18 @@ fn join(parent: &str, child: &str) -> String {
 pub fn open_any_file_from_parent(
     parent: &LocalFile,
     name: &str,
-) -> io::Result<(RawFd, String, bool)> {
+) -> io::Result<(StdFile, String, bool)> {
     let file_path = join(&parent.host_path, name);
     let cloned = file_path.to_owned();
-    let (raw_fd, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
+    let (file, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
         option.open(&cloned)
     }))?;
-    Ok((raw_fd, file_path, readable))
+    Ok((file, file_path, readable))
 }
 
 pub fn open_any_file<'a>(
     f: Box<dyn Fn(&fs::OpenOptions) -> io::Result<StdFile>>,
-) -> io::Result<(RawFd, bool)> {
+) -> io::Result<(StdFile, bool)> {
     #[derive(Debug)]
     struct Mode<'a> {
         open_option: &'a fs::OpenOptions,
@@ -442,7 +442,7 @@ pub fn open_any_file<'a>(
     let mut error = io::Error::new(io::ErrorKind::Other, "");
     for mode in modes.iter() {
         match f(mode.open_option) {
-            Ok(file) => return Ok((file.as_raw_fd(), mode.readable)),
+            Ok(file) => return Ok((file, mode.readable)),
             Err(err) => {
                 if err.raw_os_error() == Some(unix::ENOENT) {
                     return Err(err);
@@ -459,13 +459,13 @@ pub fn open_any_file<'a>(
     Err(error)
 }
 
-pub fn reopen_proc_fd(fd: &Fd, option: &fs::OpenOptions) -> io::Result<StdFile> {
-    option.open(format!("/proc/self/fd/{}", fd.fd().to_string()))
+pub fn reopen_proc_fd(fd: RawFd, option: &fs::OpenOptions) -> io::Result<StdFile> {
+    option.open(format!("/proc/self/fd/{}", fd.to_string()))
 }
 
-pub fn fstat(fd: Fd) -> io::Result<libc::stat> {
+pub fn fstat(fd: RawFd) -> io::Result<libc::stat> {
     let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-    let res = unsafe { libc::fstat(fd.fd() as i32, &mut stat) };
+    let res = unsafe { libc::fstat(fd as i32, &mut stat) };
     if res < 0 {
         // TODO: return appropriate error
         Err(io::Error::from_raw_os_error(unix::EBADF))

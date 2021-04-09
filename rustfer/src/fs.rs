@@ -395,7 +395,7 @@ pub struct SetAttr {
 
 pub trait File: DynClone + Send {
     fn walk(&self, names: Vec<&str>) -> io::Result<(Vec<QID>, Box<dyn File>)>;
-    fn open(&mut self, flags: OpenFlags) -> io::Result<(Option<Fd>, QID, u32)>;
+    fn open(&mut self, flags: OpenFlags) -> io::Result<(Option<StdFile>, QID, u32)>;
     fn close(&mut self) -> io::Result<()>;
     fn create(
         &self,
@@ -404,7 +404,7 @@ pub trait File: DynClone + Send {
         perm: FileMode,
         uid: UID,
         gid: GID,
-    ) -> io::Result<(Option<Fd>, Box<dyn File>, QID, u32)>;
+    ) -> io::Result<(Option<StdFile>, Box<dyn File>, QID, u32)>;
     fn get_attr(&self, mask: AttrMask) -> io::Result<(QID, AttrMask, Attr)>;
     fn set_attr(&self, valid: SetAttrMask, attr: SetAttr) -> io::Result<()>;
     fn walk_get_attr(
@@ -414,24 +414,23 @@ pub trait File: DynClone + Send {
     fn unlink_at(&self, name: &str, flag: i32) -> io::Result<()>;
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Fd(pub RawFd);
-impl Fd {
-    pub fn fd(&self) -> u32 {
-        let Fd(fd) = self;
-        *fd
-    }
+// #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// pub struct Fd(pub RawFd);
+// impl Fd {
+//     pub fn fd(&self) -> u32 {
+//         let Fd(fd) = self;
+//         *fd
+//     }
+//
+//     pub fn into_file(&self) -> StdFile {
+//         unsafe { StdFile::from_raw_fd(self.fd()) }
+//     }
+// }
 
-    pub fn into_file(&self) -> StdFile {
-        unsafe { StdFile::from_raw_fd(self.fd()) }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
 pub struct LocalFile {
     attach_point: AttachPoint,
     pub host_path: String,
-    file: Option<Fd>,
+    file: Option<StdFile>,
     control_readable: bool,
     mode: OpenFlags,
     file_type: stdfs::FileType,
@@ -440,14 +439,13 @@ pub struct LocalFile {
 }
 
 impl LocalFile {
-    pub fn new(a: &AttachPoint, fd: Fd, path: &str, readable: bool) -> io::Result<Self> {
+    pub fn new(a: &AttachPoint, file: StdFile, path: &str, readable: bool) -> io::Result<Self> {
         // TODO: checkSupportedFileType
-        let file = fd.into_file();
         let metadata = file.metadata().unwrap();
         Ok(LocalFile {
             attach_point: a.clone(),
             host_path: path.to_string(),
-            file: Some(fd),
+            file: Some(file),
             mode: OpenFlags::invalid_mode(),
             file_type: metadata.file_type(),
             qid: a.make_qid(metadata),
@@ -510,21 +508,19 @@ impl LocalFile {
 
     fn walk(&self, names: Vec<&str>) -> io::Result<(Vec<QID>, Box<dyn File>, libc::stat)> {
         if names.is_empty() {
-            let file = self.file.unwrap().to_owned();
-            let (raw_fd, readable) =
-                open_any_file(Box::new(move |option: &stdfs::OpenOptions| {
-                    reopen_proc_fd(&file, option)
-                }))?;
-            let fd = Fd(raw_fd);
-            let file = fd.into_file();
-            let stat = fstat(fd)?;
+            let fd = self.to_raw_fd();
+            let (file, readable) = open_any_file(Box::new(move |option: &stdfs::OpenOptions| {
+                reopen_proc_fd(fd, option)
+            }))?;
+            let metadata = file.metadata();
+            let stat = fstat(file.as_raw_fd())?;
             let c = LocalFile {
                 attach_point: self.attach_point.clone(),
                 host_path: self.host_path.clone(),
-                file: Some(fd),
+                file: Some(file),
                 mode: OpenFlags::invalid_mode(),
                 file_type: self.file_type,
-                qid: self.attach_point.make_qid(file.metadata().unwrap()),
+                qid: self.attach_point.make_qid(metadata.unwrap()),
                 control_readable: readable,
                 last_dir_offset: 0,
             };
@@ -535,18 +531,16 @@ impl LocalFile {
         let mut last_stat: libc::stat = unsafe { std::mem::zeroed() };
         let mut qids = Vec::new();
         for name in names {
-            let (raw_fd, path, readable) = open_any_file_from_parent(&last, name)?;
+            let (file, path, readable) = open_any_file_from_parent(&last, name)?;
             if &last != self {
                 last.close();
             }
-            let fd = Fd(raw_fd);
-            let file = fd.into_file();
-            last_stat = fstat(fd).map_err(|e| {
+            last_stat = fstat(file.as_raw_fd()).map_err(|e| {
                 // f.close();
                 e
             })?;
             let ap = &last.attach_point;
-            let c = LocalFile::new(ap, fd, &path, readable).map_err(|e| {
+            let c = LocalFile::new(ap, file, &path, readable).map_err(|e| {
                 // f.close();
                 e
             })?;
@@ -554,6 +548,10 @@ impl LocalFile {
             qids.push(c.qid.clone());
         }
         Ok((qids, Box::new(last), last_stat))
+    }
+
+    fn to_raw_fd(&self) -> RawFd {
+        self.file.as_ref().unwrap().as_raw_fd()
     }
 }
 
@@ -565,7 +563,7 @@ impl File for LocalFile {
         }
     }
 
-    fn open(&mut self, flags: OpenFlags) -> io::Result<(Option<Fd>, QID, u32)> {
+    fn open(&mut self, flags: OpenFlags) -> io::Result<(Option<StdFile>, QID, u32)> {
         if self.is_open() {
             panic!("attempting to open already opened file: {}", self.host_path);
         }
@@ -581,28 +579,27 @@ impl File for LocalFile {
                 "Open reusing control file, flags: {:?}, {}",
                 flags, self.host_path
             );
-            self.file
+            self.file.as_ref().unwrap().try_clone().unwrap()
         } else {
             println!(
                 "Open reopening file, flags: {:?}, {}",
                 flags, self.host_path
             );
             let option = stdfs::OpenOptions::new();
-            let std_file = reopen_proc_fd(&self.file.unwrap(), &option)?;
-            Some(Fd(std_file.as_raw_fd()))
+            reopen_proc_fd(self.to_raw_fd(), &option)?
         };
 
         let fd = if self.file_type.is_file() {
             // TODO: new_fd_maybe
-            new_file
+            Some(new_file.try_clone().unwrap())
         } else {
             None
         };
 
-        if new_file != self.file {
-            // self.file.close();
-            self.file = new_file;
-        }
+        // if new_file != self.file {
+        // self.file.close();
+        self.file = Some(new_file);
+        //}
         self.mode = mode;
         Ok((fd, self.qid, 0))
     }
@@ -620,7 +617,7 @@ impl File for LocalFile {
         perm: FileMode,
         uid: UID,
         gid: GID,
-    ) -> io::Result<(Option<Fd>, Box<dyn File>, QID, u32)> {
+    ) -> io::Result<(Option<StdFile>, Box<dyn File>, QID, u32)> {
         self.check_ro_mount()?;
         let mode = OpenFlags(flags.os_flags() & OpenFlags::MASK);
         let path = Path::new(&self.host_path).join(name);
@@ -631,7 +628,7 @@ impl File for LocalFile {
         let c = LocalFile {
             attach_point: self.attach_point.clone(),
             host_path: path.to_str().unwrap().to_string(),
-            file: Some(Fd(child.as_raw_fd())),
+            file: Some(child),
             mode: mode,
             file_type: metadata.file_type(),
             qid: self.attach_point.make_qid(metadata),
@@ -639,13 +636,16 @@ impl File for LocalFile {
             last_dir_offset: 0,
         };
         let qid = c.qid;
+        let file = match c.file {
+            Some(ref file) => Some(file.try_clone().unwrap()),
+            None => None,
+        };
         // TODO: newFDMaybe
-        Ok((c.file, Box::new(c), qid, 0))
+        Ok((file, Box::new(c), qid, 0))
     }
 
     fn get_attr(&self, _mask: AttrMask) -> io::Result<(QID, AttrMask, Attr)> {
-        let file = self.file.unwrap();
-        let stat = fstat(file)?;
+        let stat = fstat(self.to_raw_fd())?;
         let (mask, attr) = self.fill_attr(&stat);
         Ok((self.qid, mask, attr))
     }
@@ -674,20 +674,26 @@ impl File for LocalFile {
         }
         let perform_close =
             self.file_type.is_file() && !self.mode.is_write_only() && !self.mode.is_read_write();
-        let file = if perform_close {
-            let std_file =
-                reopen_proc_fd(&self.file.unwrap(), stdfs::OpenOptions::new().write(true))?;
-            Some(Fd(std_file.as_raw_fd()))
+        let (mut file, file_raw_fd) = if perform_close {
+            let std_file = reopen_proc_fd(self.to_raw_fd(), stdfs::OpenOptions::new().write(true))?;
+            let fd = std_file.as_raw_fd();
+            (Some(std_file), Some(fd))
         } else {
-            self.file
+            match self.file {
+                Some(ref file) => {
+                    let cloned = file.try_clone().unwrap();
+                    let fd = cloned.as_raw_fd();
+                    (Some(cloned), Some(fd))
+                }
+                None => (None, None),
+            }
         };
         let mut ret = Ok(());
         if valid.permissions {
             panic!("SetAttr fchmod is currently not supported.");
         }
         if valid.size {
-            let mut std_file = file.unwrap().into_file();
-            std_file.set_len(attr.size)?;
+            file.unwrap().set_len(attr.size)?;
         }
 
         if valid.a_time || valid.m_time {
@@ -729,7 +735,7 @@ impl File for LocalFile {
                     ));
                 }
             } else {
-                let res = unsafe { libc::futimens(file.unwrap().fd() as i32, utimes.as_ptr()) };
+                let res = unsafe { libc::futimens(file_raw_fd.unwrap() as i32, utimes.as_ptr()) };
                 if res < 0 {
                     ret = Err(io::Error::new(
                         io::ErrorKind::Other,
@@ -767,17 +773,40 @@ impl File for LocalFile {
 
     fn unlink_at(&self, name: &str, flag: i32) -> io::Result<()> {
         self.check_ro_mount()?;
-        let res = unsafe {
-            libc::unlinkat(
-                self.file.unwrap().fd() as i32,
-                name.as_ptr() as *const i8,
-                flag,
-            )
-        };
+        let res =
+            unsafe { libc::unlinkat(self.to_raw_fd() as i32, name.as_ptr() as *const i8, flag) };
         if res < 0 {
             Err(io::Error::new(io::ErrorKind::Other, "unlink_at failed"))
         } else {
             Ok(())
+        }
+    }
+}
+
+impl PartialEq for LocalFile {
+    fn eq(&self, other: &Self) -> bool {
+        // TODO: consider self.file as well
+        self.attach_point == other.attach_point
+            && self.host_path == other.host_path
+            && self.control_readable == other.control_readable
+            && self.mode == other.mode
+            && self.file_type == other.file_type
+            && self.qid == other.qid
+            && self.last_dir_offset == other.last_dir_offset
+    }
+}
+impl Eq for LocalFile {}
+impl Clone for LocalFile {
+    fn clone(&self) -> Self {
+        Self {
+            attach_point: self.attach_point.clone(),
+            host_path: self.host_path.clone(),
+            file: self.file.as_ref().unwrap().try_clone().ok(),
+            control_readable: self.control_readable,
+            mode: self.mode,
+            file_type: self.file_type,
+            qid: self.qid,
+            last_dir_offset: self.last_dir_offset,
         }
     }
 }

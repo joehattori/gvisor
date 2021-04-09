@@ -65,8 +65,7 @@ fn rustfer_init(
     let mut spec = read_spec_from_file(&bundle_dir, spec_file, &mut config)
         .unwrap_or_else(|e| panic!("reading spec {}", e));
     if set_up_root {
-        // TODO
-        // setup_root_fs(spec, config).unwrap_or_else(|e| panic!("Error setting up root FS: {}", e));
+        // TODO: setup_root_fs(spec, config).unwrap_or_else(|e| panic!("Error setting up root FS: {}", e));
         panic!("not implemented");
     }
     if apply_caps {

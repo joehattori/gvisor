@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use serde::{Deserialize, Serialize};
 
 use crate::connection::ConnState;
-use crate::fs::{Attr, AttrMask, FIDRef, Fd, File, FileMode, OpenFlags, SetAttr, SetAttrMask, FID};
+use crate::fs::{Attr, AttrMask, FIDRef, File, FileMode, OpenFlags, SetAttr, SetAttrMask, FID};
 use crate::unix;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -97,8 +97,8 @@ impl Request for Tlopen {
             Ok((os_file, qid, io_unit)) => {
                 fid_ref.is_opened = true;
                 fid_ref.open_flags = self.flags;
-                let mut rlopen = Rlopen::new(qid, io_unit);
-                rlopen.set_file_payload(os_file);
+                let rlopen = Rlopen::new(qid, io_unit);
+                // rlopen.set_file_payload(os_file);
                 fid_ref.dec_ref();
                 serde_traitobject::Box::new(rlopen)
             }
@@ -448,11 +448,11 @@ impl Tlcreate {
                     rf.add_child_to_path_node(&new_ref, &self.name);
                     rf.inc_ref();
                     cs.insert_fid(&self.fid, &mut new_ref);
-                    let file = None;
+                    // let file = None;
                     let mut rlcreate = Rlcreate {
-                        rlopen: Rlopen { qid, io_unit, file },
+                        rlopen: Rlopen { qid, io_unit },
                     };
-                    rlcreate.set_file_payload(os_file);
+                    // rlcreate.set_file_payload(os_file);
                     Ok(rlcreate)
                 }
                 Err(err) => {
@@ -476,25 +476,21 @@ impl Request for Tlcreate {
 
 pub trait Response: serde_traitobject::Serialize + serde_traitobject::Deserialize {}
 
+// NEXT: here! do we need StdFile in Rlopen? maybe unneeded in a demo projec?
 #[derive(Serialize, Deserialize)]
 pub struct Rlopen {
     qid: QID,
     io_unit: u32,
-    file: Option<Fd>,
 }
 
 impl Rlopen {
     pub fn new(qid: QID, io_unit: u32) -> Self {
-        Rlopen {
-            qid,
-            io_unit,
-            file: None,
-        }
+        Rlopen { qid, io_unit }
     }
 
-    pub fn set_file_payload(&mut self, fd: Option<Fd>) {
-        self.file = fd;
-    }
+    //  pub fn set_file_payload(&mut self, fd: Option<StdFile>) {
+    //      self.file = fd;
+    //  }
 }
 
 impl Response for Rlopen {}
@@ -523,9 +519,9 @@ pub struct Rlcreate {
 }
 impl Response for Rlcreate {}
 impl Rlcreate {
-    fn set_file_payload(&mut self, fd: Option<Fd>) {
-        self.rlopen.set_file_payload(fd)
-    }
+    //fn set_file_payload(&mut self, fd: Option<Fd>) {
+    //    self.rlopen.set_file_payload(fd)
+    //}
 }
 
 #[derive(Serialize, Deserialize)]
