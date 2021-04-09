@@ -4,7 +4,9 @@ use std::os::raw::{c_char, c_int, c_void};
 
 use crate::connection::ConnState;
 use crate::filter::{install, install_uds_filters};
-use crate::message::{handle, Request, Tattach, Tlopen};
+use crate::message::{
+    handle, Request, Tattach, Tauth, Tclunk, Tlcreate, Tlopen, Tremove, Tsetattrclunk,
+};
 use crate::rustfer::{
     is_read_only_mount, resolve_mounts, write_mounts, AttachPoint, AttachPointConfig, Config,
     Rustfer,
@@ -164,15 +166,43 @@ fn configure_server(ats: Vec<AttachPoint>, io_fds: Vec<i32>) {
 }
 
 #[no_mangle]
-fn rustfer_open(tlopen: *mut c_char) -> *const u8 {
-    let msg = unsafe { CStr::from_ptr(tlopen) }.to_str().unwrap();
-    let msg = serde_json::from_str(&msg).unwrap();
-    handle::<Tlopen>(msg)
+fn rustfer_open(msg: *mut c_char) -> *const u8 {
+    let tlopen = Tlopen::from_ptr(msg);
+    handle(*tlopen)
 }
 
 #[no_mangle]
-fn rustfer_attach(tattach: *mut c_char) -> *const u8 {
-    let msg = unsafe { CStr::from_ptr(tattach) }.to_str().unwrap();
-    let msg = serde_json::from_str(&msg).unwrap();
-    handle::<Tattach>(msg)
+fn rustfer_clunk(msg: *mut c_char) -> *const u8 {
+    let tclunk = Tclunk::from_ptr(msg);
+    handle(*tclunk)
+}
+
+#[no_mangle]
+fn rustfer_setattrclunk(msg: *mut c_char) -> *const u8 {
+    let tsetattrclunk = Tsetattrclunk::from_ptr(msg);
+    handle(*tsetattrclunk)
+}
+
+#[no_mangle]
+fn rustfer_remove(msg: *mut c_char) -> *const u8 {
+    let tremove = Tremove::from_ptr(msg);
+    handle(*tremove)
+}
+
+#[no_mangle]
+fn rustfer_attach(msg: *mut c_char) -> *const u8 {
+    let tattach = Tattach::from_ptr(msg);
+    handle(*tattach)
+}
+
+#[no_mangle]
+fn rustfer_create(msg: *mut c_char) -> *const u8 {
+    let tcreate = Tlcreate::from_ptr(msg);
+    handle(*tcreate)
+}
+
+#[no_mangle]
+fn rustfer_auth(msg: *mut c_char) -> *const u8 {
+    let tauth = Tauth::from_ptr(msg);
+    handle(*tauth)
 }

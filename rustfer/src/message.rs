@@ -1,5 +1,7 @@
+use std::ffi::CStr;
 use std::fs;
 use std::io::{self, Error, ErrorKind};
+use std::os::raw::c_char;
 use std::os::wasi::prelude::*;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -72,6 +74,12 @@ pub struct Tlopen {
     pub fid: FID,
     pub flags: OpenFlags,
 }
+impl Tlopen {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
+}
 
 impl Request for Tlopen {
     fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
@@ -117,6 +125,12 @@ pub struct Tauth {
     attach_name: String,
     uid: UID,
 }
+impl Tauth {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
+}
 
 impl Request for Tauth {
     // We don't support authentication, so this just returns ENOSYS.
@@ -128,6 +142,12 @@ impl Request for Tauth {
 #[derive(Serialize, Deserialize)]
 pub struct Tclunk {
     fid: FID,
+}
+impl Tclunk {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
 }
 
 impl Request for Tclunk {
@@ -145,6 +165,12 @@ pub struct Tsetattrclunk {
     fid: FID,
     valid: SetAttrMask,
     set_attr: SetAttr,
+}
+impl Tsetattrclunk {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
 }
 
 impl Request for Tsetattrclunk {
@@ -177,6 +203,12 @@ impl Request for Tsetattrclunk {
 #[derive(Serialize, Deserialize)]
 pub struct Tremove {
     fid: FID,
+}
+impl Tremove {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
 }
 
 impl Request for Tremove {
@@ -216,6 +248,12 @@ impl Request for Tremove {
 pub struct Tattach {
     fid: FID,
     auth: Tauth,
+}
+impl Tattach {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
 }
 
 impl Request for Tattach {
@@ -415,6 +453,11 @@ pub struct Tlcreate {
 }
 
 impl Tlcreate {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
+
     fn perform(&self, cs: &ConnState, uid: UID) -> Result<Rlcreate, i32> {
         check_safe_name(&self.name).map_err(|_| unix::EINVAL)?;
         let mut rf = match cs.lookup_fid(&self.fid) {
