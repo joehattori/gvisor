@@ -444,6 +444,28 @@ fn walk_one(
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct Tucreate {
+    tlcreate: Tlcreate,
+    uid: UID,
+}
+impl Tucreate {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
+}
+
+impl Request for Tucreate {
+    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+        let rlcreate = match self.tlcreate.perform(cs, NO_UID) {
+            Ok(rlcreate) => rlcreate,
+            Err(e) => return errno_to_serde_traitobject(e),
+        };
+        serde_traitobject::Box::new(Rucreate { rlcreate })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Tlcreate {
     fid: FID,
     name: String,
@@ -453,11 +475,6 @@ pub struct Tlcreate {
 }
 
 impl Tlcreate {
-    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
-        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
-        serde_json::from_str(&msg).unwrap()
-    }
-
     fn perform(&self, cs: &ConnState, uid: UID) -> Result<Rlcreate, i32> {
         check_safe_name(&self.name).map_err(|_| unix::EINVAL)?;
         let mut rf = match cs.lookup_fid(&self.fid) {
@@ -507,16 +524,6 @@ impl Tlcreate {
     }
 }
 
-impl Request for Tlcreate {
-    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
-        let rlcreate = match self.perform(cs, NO_UID) {
-            Ok(rlcreate) => rlcreate,
-            Err(e) => return errno_to_serde_traitobject(e),
-        };
-        serde_traitobject::Box::new(rlcreate)
-    }
-}
-
 pub trait Response: serde_traitobject::Serialize + serde_traitobject::Deserialize {}
 
 // NEXT: here! do we need StdFile in Rlopen? maybe unneeded in a demo projec?
@@ -560,12 +567,17 @@ impl Response for Rattach {}
 pub struct Rlcreate {
     rlopen: Rlopen,
 }
-impl Response for Rlcreate {}
 impl Rlcreate {
     //fn set_file_payload(&mut self, fd: Option<Fd>) {
     //    self.rlopen.set_file_payload(fd)
     //}
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct Rucreate {
+    rlcreate: Rlcreate,
+}
+impl Response for Rucreate {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rlerror {
