@@ -5,7 +5,7 @@ use std::os::raw::{c_char, c_int, c_void};
 use crate::connection::ConnState;
 use crate::filter::{install, install_uds_filters};
 use crate::message::{
-    handle, Request, Tattach, Tauth, Tclunk, Tlopen, Tremove, Tsetattrclunk, Tucreate,
+    handle, Request, Tattach, Tauth, Tclunk, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate,
 };
 use crate::rustfer::{
     is_read_only_mount, resolve_mounts, write_mounts, AttachPoint, AttachPointConfig, Config,
@@ -199,6 +199,12 @@ fn rustfer_tattach(msg: *mut c_char) -> *const u8 {
 fn rustfer_tucreate(msg: *mut c_char) -> *const u8 {
     let tucreate = Tucreate::from_ptr(msg);
     handle(*tucreate)
+}
+
+#[no_mangle]
+fn rustfer_tlcreate(msg: *mut c_char) -> *const u8 {
+    let tlcreate = Tlcreate::from_ptr(msg);
+    handle(*tlcreate)
 }
 
 #[no_mangle]

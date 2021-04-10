@@ -475,6 +475,11 @@ pub struct Tlcreate {
 }
 
 impl Tlcreate {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
+
     fn perform(&self, cs: &ConnState, uid: UID) -> Result<Rlcreate, i32> {
         check_safe_name(&self.name).map_err(|_| unix::EINVAL)?;
         let mut rf = match cs.lookup_fid(&self.fid) {
@@ -509,7 +514,7 @@ impl Tlcreate {
                     rf.inc_ref();
                     cs.insert_fid(&self.fid, &mut new_ref);
                     // let file = None;
-                    let mut rlcreate = Rlcreate {
+                    let rlcreate = Rlcreate {
                         rlopen: Rlopen { qid, io_unit },
                     };
                     // rlcreate.set_file_payload(os_file);
@@ -521,6 +526,16 @@ impl Tlcreate {
                 }
             }
         }
+    }
+}
+
+impl Request for Tlcreate {
+    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+        let rlcreate = match self.perform(cs, NO_UID) {
+            Ok(rlcreate) => rlcreate,
+            Err(e) => return errno_to_serde_traitobject(e),
+        };
+        serde_traitobject::Box::new(rlcreate)
     }
 }
 
