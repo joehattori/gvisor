@@ -313,7 +313,7 @@ impl AttachPoint {
         } else {
             Ok(AttachPoint {
                 prefix: prefix.to_string(),
-                config: config,
+                config,
                 attached: Arc::new(Mutex::new(false)),
                 next_device: Arc::new(Mutex::new(0)),
                 devices: Arc::new(Mutex::new(HashMap::new())),

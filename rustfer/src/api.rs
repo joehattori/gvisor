@@ -2,7 +2,7 @@ use std::ffi::CStr;
 use std::fs::File;
 use std::os::raw::{c_char, c_int, c_void};
 
-use crate::connection::ConnState;
+use crate::connection::{ConnState, Server};
 use crate::filter::{install, install_uds_filters};
 use crate::message::{
     handle, Request, Tattach, Tauth, Tclunk, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate,
@@ -156,17 +156,21 @@ fn rustfer_init(
         install_uds_filters();
     }
     install().unwrap_or_else(|e| panic!("installing seccomp filters: {}", e));
+
+    configure_server(ats, io_fds);
 }
 
 fn configure_server(ats: Vec<AttachPoint>, io_fds: Vec<i32>) {
-    // for at in ats {
-    //     let server = Server::new(Box::new(at));
-    //     let cs = ConnState::new(s, conn);
-    // }
+    for i in 0..ats.len() {
+        let io_fd = io_fds[i];
+        let at = ats[i];
+        let server = Server::new(at);
+        let conn_state = ConnState::new(server);
+    }
 }
 
 #[no_mangle]
-fn rustfer_topen(msg: *mut c_char) -> *const u8 {
+fn rustfer_tlopen(msg: *mut c_char) -> *const u8 {
     let tlopen = Tlopen::from_ptr(msg);
     handle(*tlopen)
 }

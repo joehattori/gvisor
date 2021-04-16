@@ -31,6 +31,7 @@ go_library(
         "@com_github_gofrs_flock//:go_default_library",
         "@com_github_opencontainers_runtime_spec//specs-go:go_default_library",
         "@org_golang_x_sys//unix:go_default_library",
+        "@com_github_joehattori_wasmer_go//wasmer:wasmer",
     ],
 )
 
@@ -74,5 +75,6 @@ go_test(
         "@com_github_kr_pty//:go_default_library",
         "@com_github_opencontainers_runtime_spec//specs-go:go_default_library",
         "@org_golang_x_sys//unix:go_default_library",
+        "@com_github_joehattori_wasmer_go//wasmer:go_default_library",
     ],
 )

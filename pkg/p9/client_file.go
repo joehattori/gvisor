@@ -538,6 +538,7 @@ func (c *clientFile) Create(name string, openFlags OpenFlags, permissions FileMo
 
 	rlcreate := Rlcreate{}
 	log.Infof("\njoehattori: before sendRecv() on Create %v\n", time.Now())
+	// NEXT: support rustfer_tlcreate and replace with the wasm!
 	if err := c.client.sendRecv(&msg, &rlcreate); err != nil {
 		return nil, nil, QID{}, 0, err
 	}

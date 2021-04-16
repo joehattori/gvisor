@@ -283,7 +283,7 @@ impl Request for Tattach {
             is_deleted: AtomicBool::new(false),
             is_opened: false,
             open_flags: OpenFlags(0),
-            file: file,
+            file,
             parent: None,
             server: cs.server.clone(),
             refs: AtomicI64::new(1),
@@ -292,15 +292,17 @@ impl Request for Tattach {
         };
         if self.auth.attach_name.is_empty() {
             cs.insert_fid(&self.fid, &mut root);
-            return serde_traitobject::Box::new(Rattach { qid });
+            root.dec_ref();
+        } else {
+            let (_, mut new_ref, _, _) =
+                match do_walk(&cs, root.clone(), &Path::new(&self.auth.attach_name), false) {
+                    Ok(v) => v,
+                    Err(e) => return errno_to_serde_traitobject(extract_errno(e)),
+                };
+            cs.insert_fid(&self.fid, &mut new_ref);
+            new_ref.dec_ref();
+            root.dec_ref();
         }
-        let (_, mut new_ref, _, _) =
-            match do_walk(&cs, root, &Path::new(&self.auth.attach_name), false) {
-                Ok(v) => v,
-                Err(e) => return errno_to_serde_traitobject(extract_errno(e)),
-            };
-        cs.insert_fid(&self.fid, &mut new_ref);
-        new_ref.dec_ref();
         serde_traitobject::Box::new(Rattach { qid })
     }
 }
@@ -484,9 +486,7 @@ impl Tlcreate {
         check_safe_name(&self.name).map_err(|_| unix::EINVAL)?;
         let mut rf = match cs.lookup_fid(&self.fid) {
             Some(rf) => rf,
-            None => {
-                return Err(unix::EBADF);
-            }
+            None => return Err(unix::EBADF),
         };
         // TODO: safelyWrite
         if rf.is_deleted() || !rf.mode.is_dir() || rf.is_opened {
@@ -506,7 +506,7 @@ impl Tlcreate {
                         is_opened: true,
                         open_flags: self.open_flags,
                         mode: FileMode::regular(),
-                        path_node: path_node,
+                        path_node,
                         is_deleted: AtomicBool::new(false),
                         refs: AtomicI64::new(0),
                     };

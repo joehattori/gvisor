@@ -629,7 +629,7 @@ impl File for LocalFile {
             attach_point: self.attach_point.clone(),
             host_path: path.to_str().unwrap().to_string(),
             file: Some(child),
-            mode: mode,
+            mode,
             file_type: metadata.file_type(),
             qid: self.attach_point.make_qid(metadata),
             control_readable: false,

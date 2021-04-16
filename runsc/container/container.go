@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
+	"github.com/joehattori/wasmer-go/wasmer"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/abi/linux"
@@ -821,7 +822,51 @@ func (c *Container) waitForStopped() error {
 	return backoff.Retry(op, b)
 }
 
+type rustfer struct {
+	instance *wasmer.Instance
+}
+
+var Rustfer *rustfer = nil
+
+func initWasm() {
+	const WASM_FILE = "target/wasm32-wasi/release/rustfer.wasm"
+	wasmBytes, err := ioutil.ReadFile(WASM_FILE)
+	check(err)
+	engine := wasmer.NewEngine()
+	store := wasmer.NewStore(engine)
+	module, err := wasmer.NewModule(store, wasmBytes)
+	wasiEnv, err := wasmer.NewWasiStateBuilder("program").
+		InheritStdout().
+		InheritStderr().
+		MapDirectory(".", ".").
+		Finalize()
+	check(err)
+	importObject, err := wasiEnv.GenerateImportObject(store, module)
+	check(err)
+	instance, err := wasmer.NewInstance(module, importObject)
+	check(err)
+	start, err := instance.Exports.GetWasiStartFunction()
+	check(err)
+	_, err = start()
+	check(err)
+	memory, err := instance.Exports.GetMemory("memory")
+	check(err)
+	if memory == nil {
+		panic("memory is nil")
+	}
+	Rustfer = &rustfer{instance}
+}
+
+func check(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
 func (c *Container) createGoferProcess(spec *specs.Spec, conf *config.Config, bundleDir string, attached bool) ([]*os.File, *os.File, error) {
+	// Load wasm on Gofer creation
+	initWasm()
+
 	// Start with the general config flags.
 	args := conf.ToFlags()
 
@@ -892,6 +937,7 @@ func (c *Container) createGoferProcess(spec *specs.Spec, conf *config.Config, bu
 	}
 
 	sandEnds := make([]*os.File, 0, mountCount)
+	var goferFds []int
 	for i := 0; i < mountCount; i++ {
 		fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 		if err != nil {
@@ -902,10 +948,12 @@ func (c *Container) createGoferProcess(spec *specs.Spec, conf *config.Config, bu
 		goferEnd := os.NewFile(uintptr(fds[1]), "gofer IO FD")
 		defer goferEnd.Close()
 		goferEnds = append(goferEnds, goferEnd)
+		goferFds = append(goferFds, fds[1])
 
 		args = append(args, fmt.Sprintf("--io-fds=%d", nextFD))
 		nextFD++
 	}
+	log.Infof("joehattori: goferFds: %v\n", goferFds)
 
 	binPath := specutils.ExePath
 	cmd := exec.Command(binPath, args...)
