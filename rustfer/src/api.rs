@@ -163,56 +163,57 @@ fn rustfer_init(
 fn configure_server(ats: Vec<AttachPoint>, io_fds: Vec<i32>) {
     for i in 0..ats.len() {
         let io_fd = io_fds[i];
-        let at = ats[i];
-        let server = Server::new(at);
+        let at = &ats[i];
+        let server = Server::new(Box::new(at.clone()));
         let conn_state = ConnState::new(server);
+        ConnState::insert_conn_state(io_fd, conn_state);
     }
 }
 
 #[no_mangle]
-fn rustfer_tlopen(msg: *mut c_char) -> *const u8 {
+fn rustfer_tlopen(io_fd: i32, msg: *mut c_char) -> *const u8 {
     let tlopen = Tlopen::from_ptr(msg);
-    handle(*tlopen)
+    handle(io_fd, *tlopen)
 }
 
 #[no_mangle]
-fn rustfer_tclunk(msg: *mut c_char) -> *const u8 {
+fn rustfer_tclunk(io_fd: i32, msg: *mut c_char) -> *const u8 {
     let tclunk = Tclunk::from_ptr(msg);
-    handle(*tclunk)
+    handle(io_fd, *tclunk)
 }
 
 #[no_mangle]
-fn rustfer_tsetattrclunk(msg: *mut c_char) -> *const u8 {
+fn rustfer_tsetattrclunk(io_fd: i32, msg: *mut c_char) -> *const u8 {
     let tsetattrclunk = Tsetattrclunk::from_ptr(msg);
-    handle(*tsetattrclunk)
+    handle(io_fd, *tsetattrclunk)
 }
 
 #[no_mangle]
-fn rustfer_tremove(msg: *mut c_char) -> *const u8 {
+fn rustfer_tremove(io_fd: i32, msg: *mut c_char) -> *const u8 {
     let tremove = Tremove::from_ptr(msg);
-    handle(*tremove)
+    handle(io_fd, *tremove)
 }
 
 #[no_mangle]
-fn rustfer_tattach(msg: *mut c_char) -> *const u8 {
+fn rustfer_tattach(io_fd: i32, msg: *mut c_char) -> *const u8 {
     let tattach = Tattach::from_ptr(msg);
-    handle(*tattach)
+    handle(io_fd, *tattach)
 }
 
 #[no_mangle]
-fn rustfer_tucreate(msg: *mut c_char) -> *const u8 {
+fn rustfer_tucreate(io_fd: i32, msg: *mut c_char) -> *const u8 {
     let tucreate = Tucreate::from_ptr(msg);
-    handle(*tucreate)
+    handle(io_fd, *tucreate)
 }
 
 #[no_mangle]
-fn rustfer_tlcreate(msg: *mut c_char) -> *const u8 {
+fn rustfer_tlcreate(io_fd: i32, msg: *mut c_char) -> *const u8 {
     let tlcreate = Tlcreate::from_ptr(msg);
-    handle(*tlcreate)
+    handle(io_fd, *tlcreate)
 }
 
 #[no_mangle]
-fn rustfer_tauth(msg: *mut c_char) -> *const u8 {
+fn rustfer_tauth(io_fd: i32, msg: *mut c_char) -> *const u8 {
     let tauth = Tauth::from_ptr(msg);
-    handle(*tauth)
+    handle(io_fd, *tauth)
 }
