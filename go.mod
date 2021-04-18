@@ -58,3 +58,5 @@ require (
 	k8s.io/apimachinery v0.16.14-rc.0 // indirect
 	k8s.io/client-go v0.16.13 // indirect
 )
+
+replace gvisor.dev/gvisor => .

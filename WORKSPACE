@@ -1466,3 +1466,8 @@ go_repository(
     sum = "h1:LhYJRs+L4fBtjZUfuSZIKGeVu0QRy8e5Xi7D17UxZ74=",
     version = "v1.2.0",
 )
+
+local_repository(
+    name = "com_github_joehattori_wasmer_go",
+    path = "/home/vagrant/wasmer-go",
+)
