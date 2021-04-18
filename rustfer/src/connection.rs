@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use once_cell::sync::OnceCell;
+use once_cell::sync::Lazy;
 
 use crate::fs::{Attacher, FIDRef, PathNode, FID};
 
-static CONN_STATE: OnceCell<Mutex<Vec<ConnState>>> = OnceCell::new();
+static CONNECTIONS: Lazy<Mutex<HashMap<i32, ConnState>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
+#[derive(Clone)]
 pub struct ConnState {
     pub fids: Arc<Mutex<HashMap<FID, FIDRef>>>,
     pub server: Server,
@@ -20,13 +21,16 @@ impl ConnState {
         }
     }
 
-    pub fn get() -> &'static Mutex<ConnState> {
-        &*CONN_STATE.get().unwrap()
+    pub fn insert_conn_state(fd: i32, cs: ConnState) {
+        CONNECTIONS.lock().unwrap().insert(fd, cs);
     }
 
-    //    pub fn push(cs: ConnState) {
-    //        CONN_STATE.get().unwrap().lock().unwrap().push(cs);
-    //    }
+    pub fn get_conn_state(fd: i32) -> ConnState {
+        let cs = CONNECTIONS.lock().unwrap();
+        cs.get(&fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", fd))
+            .clone()
+    }
 
     pub fn lookup_fid(&self, fid: &FID) -> Option<FIDRef> {
         let mut fids = self.fids.lock().unwrap();

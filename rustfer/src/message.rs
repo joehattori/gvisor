@@ -58,10 +58,9 @@ pub struct QID {
     pub path: u64,
 }
 
-pub fn handle<T: serde_traitobject::Deserialize + Request>(mut msg: T) -> *const u8 {
-    // TODO: get corresponding ConnState
-    let cs = &*ConnState::get().lock().unwrap();
-    let res = msg.handle(cs);
+pub fn handle<T: serde_traitobject::Deserialize + Request>(io_fd: i32, mut msg: T) -> *const u8 {
+    let cs = ConnState::get_conn_state(io_fd);
+    let res = msg.handle(&cs);
     serde_json::to_string(&res).unwrap().as_ptr()
 }
 
