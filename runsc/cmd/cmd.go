@@ -17,6 +17,7 @@ package cmd
 
 import (
 	"fmt"
+	"io/ioutil"
 	"runtime"
 	"strconv"
 	"syscall"
@@ -72,6 +73,11 @@ func setCapsAndCallSelf(args []string, caps *specs.LinuxCapabilities) error {
 
 	log.Infof("Execve %q again, bye!", binPath)
 	err := syscall.Exec(binPath, args, []string{})
+	files, _ := ioutil.ReadDir("/")
+	log.Infof("joe ListDir\n")
+	for _, f := range files {
+		log.Infof("joe: %v\n", f.Name())
+	}
 	return fmt.Errorf("error executing %s: %v", binPath, err)
 }
 

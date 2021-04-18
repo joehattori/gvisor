@@ -30,6 +30,7 @@ import (
 
 	"github.com/cenkalti/backoff"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/wasmerio/wasmer-go/wasmer"
 	"gvisor.dev/gvisor/pkg/abi/linux"
 	"gvisor.dev/gvisor/pkg/cleanup"
 	"gvisor.dev/gvisor/pkg/log"
@@ -820,7 +821,54 @@ func (c *Container) waitForStopped() error {
 	return backoff.Retry(op, b)
 }
 
+type rustfer struct {
+	instance *wasmer.Instance
+}
+
+var Rustfer *rustfer = nil
+
+func initWasm() {
+	const WASM_FILE = "rustfer/target/wasm32-wasi/release/rustfer.wasm"
+	wasmBytes, err := ioutil.ReadFile(WASM_FILE)
+	check(err)
+	engine := wasmer.NewEngine()
+	store := wasmer.NewStore(engine)
+	module, err := wasmer.NewModule(store, wasmBytes)
+	wasiEnv, err := wasmer.NewWasiStateBuilder("program").
+		InheritStdout().
+		InheritStderr().
+		MapDirectory(".", ".").
+		Finalize()
+	check(err)
+	importObject, err := wasiEnv.GenerateImportObject(store, module)
+	check(err)
+	instance, err := wasmer.NewInstance(module, importObject)
+	check(err)
+	start, err := instance.Exports.GetWasiStartFunction()
+	check(err)
+	_, err = start()
+	check(err)
+	memory, err := instance.Exports.GetMemory("memory")
+	check(err)
+	if memory == nil {
+		panic("memory is nil")
+	}
+	Rustfer = &rustfer{instance}
+}
+
+func check(err error) {
+	if err != nil {
+		path, _ := os.Getwd()
+		files, _ := ioutil.ReadDir(".")
+		panic(fmt.Sprintf("error: %v, path: %v, listdir: %v", err, path, files))
+	}
+}
+
 func (c *Container) createGoferProcess(spec *specs.Spec, conf *config.Config, bundleDir string, attached bool) ([]*os.File, *os.File, error) {
+	// JOETODO
+	// initWasm()
+	// log.Infof("joehattori: initWasm() called")
+
 	// Start with the general config flags.
 	args := conf.ToFlags()
 
