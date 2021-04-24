@@ -14,6 +14,7 @@ go_library(
         "//runsc:__subpackages__",
         "//test:__subpackages__",
     ],
+    cgo = True,
     deps = [
         "//pkg/abi/linux",
         "//pkg/cleanup",

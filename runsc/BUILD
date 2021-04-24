@@ -11,6 +11,7 @@ go_binary(
     visibility = [
         "//visibility:public",
     ],
+    pure = True,
     x_defs = {"main.version": "{STABLE_VERSION}"},
     deps = ["//runsc/cli"],
 )

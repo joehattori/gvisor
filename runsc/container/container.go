@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
-	"github.com/joehattori/wasmer-go/wasmer"
+	// "github.com/joehattori/wasmer-go/wasmer"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/abi/linux"
@@ -822,40 +822,38 @@ func (c *Container) waitForStopped() error {
 	return backoff.Retry(op, b)
 }
 
-type rustfer struct {
-	instance *wasmer.Instance
-}
+// type rustfer struct {
+// 	instance *wasmer.Instance
+// }
 
-var Rustfer *rustfer = nil
+// Rustfer is a singleton instance of rustfer.
+// var Rustfer *rustfer = nil
 
-func initWasm() {
-	const WASM_FILE = "target/wasm32-wasi/release/rustfer.wasm"
-	wasmBytes, err := ioutil.ReadFile(WASM_FILE)
-	check(err)
-	engine := wasmer.NewEngine()
-	store := wasmer.NewStore(engine)
-	module, err := wasmer.NewModule(store, wasmBytes)
-	wasiEnv, err := wasmer.NewWasiStateBuilder("program").
-		InheritStdout().
-		InheritStderr().
-		MapDirectory(".", ".").
-		Finalize()
-	check(err)
-	importObject, err := wasiEnv.GenerateImportObject(store, module)
-	check(err)
-	instance, err := wasmer.NewInstance(module, importObject)
-	check(err)
-	start, err := instance.Exports.GetWasiStartFunction()
-	check(err)
-	_, err = start()
-	check(err)
-	memory, err := instance.Exports.GetMemory("memory")
-	check(err)
-	if memory == nil {
-		panic("memory is nil")
-	}
-	Rustfer = &rustfer{instance}
-}
+// func initWasm() {
+// 	engine := wasmer.NewEngine()
+// 	store := wasmer.NewStore(engine)
+// 	module, err := wasmer.NewModule(store, wasm.wasmBytes)
+// 	wasiEnv, err := wasmer.NewWasiStateBuilder("program").
+// 		InheritStdout().
+// 		InheritStderr().
+// 		MapDirectory(".", ".").
+// 		Finalize()
+// 	check(err)
+// 	importObject, err := wasiEnv.GenerateImportObject(store, module)
+// 	check(err)
+// 	instance, err := wasmer.NewInstance(module, importObject)
+// 	check(err)
+// 	start, err := instance.Exports.GetWasiStartFunction()
+// 	check(err)
+// 	_, err = start()
+// 	check(err)
+// 	memory, err := instance.Exports.GetMemory("memory")
+// 	check(err)
+// 	if memory == nil {
+// 		panic("memory is nil")
+// 	}
+// 	Rustfer = &rustfer{instance}
+// }
 
 func check(err error) {
 	if err != nil {
@@ -865,7 +863,7 @@ func check(err error) {
 
 func (c *Container) createGoferProcess(spec *specs.Spec, conf *config.Config, bundleDir string, attached bool) ([]*os.File, *os.File, error) {
 	// Load wasm on Gofer creation
-	initWasm()
+	// initWasm()
 
 	// Start with the general config flags.
 	args := conf.ToFlags()

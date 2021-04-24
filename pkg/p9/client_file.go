@@ -17,6 +17,8 @@ package p9
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -329,6 +331,12 @@ func (c *clientFile) Open(flags OpenFlags) (*fd.FD, QID, uint32, error) {
 	log.Infof("\njoehattori: before sendRecv() on Open %v\n", time.Now())
 	if err := c.client.sendRecv(&Tlopen{FID: c.fid, Flags: flags}, &rlopen); err != nil {
 		return nil, QID{}, 0, err
+	}
+	dir, _ := os.Getwd()
+	files, _ := ioutil.ReadDir(dir)
+	log.Infof("joehattori: listing the current directory %v\n", dir)
+	for _, file := range files {
+		log.Infof("joehattori: %v\n", file.Name())
 	}
 
 	return rlopen.File, rlopen.QID, rlopen.IoUnit, nil

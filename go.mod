@@ -18,8 +18,8 @@ require (
 	github.com/containerd/ttrpc v1.0.2 // indirect
 	github.com/containerd/typeurl v0.0.0-20200205145503-b45ef1f1f737 // indirect
 	github.com/docker/distribution v2.7.1-0.20190205005809-0d3efadf0154+incompatible // indirect
-	github.com/docker/docker v1.4.2-0.20191028175130-9e7d5ac5ea55 // indirect
-	github.com/docker/go-connections v0.3.0 // indirect
+	github.com/docker/docker v1.4.2-0.20191028175130-9e7d5ac5ea55
+	github.com/docker/go-connections v0.3.0
 	github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c // indirect
 	github.com/gofrs/flock v0.8.0
 	github.com/gogo/googleapis v1.4.0 // indirect
@@ -31,6 +31,7 @@ require (
 	github.com/google/pprof v0.0.0-20210115211752-39141e76b647 // indirect
 	github.com/google/subcommands v1.0.2-0.20190508160503-636abe8753b8
 	github.com/hashicorp/go-multierror v1.1.0 // indirect
+	github.com/joehattori/wasmer-go v1.0.4
 	github.com/kr/pty v1.1.4-0.20190131011033-7dc38fb350b1
 	github.com/mattbaird/jsonpatch v0.0.0-20171005235357-81af80346b1a // indirect
 	github.com/mohae/deepcopy v0.0.0-20170308212314-bb9b5e7adda9
@@ -48,15 +49,15 @@ require (
 	golang.org/x/oauth2 v0.0.0-20201208152858-08078c50e5b5 // indirect
 	golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0
-	golang.org/x/tools v0.1.0 // indirect
+	golang.org/x/tools v0.1.0
 	google.golang.org/api v0.36.0 // indirect
 	google.golang.org/grpc v1.36.0-dev.0.20210208035533-9280052d3665 // indirect
 	google.golang.org/protobuf v1.25.1-0.20201020201750-d3470999428b
 	gopkg.in/yaml.v2 v2.2.8 // indirect
-	honnef.co/go/tools v0.1.1 // indirect
+	honnef.co/go/tools v0.1.1
 	k8s.io/api v0.16.13 // indirect
 	k8s.io/apimachinery v0.16.14-rc.0 // indirect
 	k8s.io/client-go v0.16.13 // indirect
 )
 
-replace gvisor.dev/gvisor => .
+replace gvisor.dev/gvisor => ./
