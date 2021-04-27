@@ -20,5 +20,6 @@ import (
 )
 
 func main() {
+	wasm()
 	cli.Main(version)
 }
