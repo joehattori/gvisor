@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
-	// "github.com/joehattori/wasmer-go/wasmer"
+	"github.com/joehattori/wasmer-go/wasmer"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/abi/linux"
@@ -822,9 +822,9 @@ func (c *Container) waitForStopped() error {
 	return backoff.Retry(op, b)
 }
 
-// type rustfer struct {
-// 	instance *wasmer.Instance
-// }
+type rustfer struct {
+	instance *wasmer.Instance
+}
 
 // Rustfer is a singleton instance of rustfer.
 // var Rustfer *rustfer = nil
