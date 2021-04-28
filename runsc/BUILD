@@ -12,12 +12,6 @@ go_binary(
         "//visibility:public",
     ],
     pure = False,
-    static = True,
-    cgo = True,
-    #gc_linkopts = [
-    #    "-extldflags",
-    #    "-static",
-    #],
     x_defs = {"main.version": "{STABLE_VERSION}"},
     deps = ["//runsc/cli"],
 )
