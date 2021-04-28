@@ -1467,7 +1467,14 @@ go_repository(
     version = "v1.2.0",
 )
 
-local_repository(
-    name = "local_wasmer_go",
-    path = "/home/vagrant/wasmer-go",
+go_repository(
+    name = "com_github_bytecodealliance_wasmtime_go",
+    importpath = "github.com/bytecodealliance/wasmtime-go",
+    sum = "h1:wHOt9u+irLBCUjotanqDwVbnNmTJ1gWQxY2+q+XeMp4=",
+    version = "v0.26.0",
 )
+
+#local_repository(
+#    name = "local_wasmer_go",
+#    path = "/home/vagrant/wasmer-go",
+#)

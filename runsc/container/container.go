@@ -28,8 +28,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bytecodealliance/wasmtime-go"
 	"github.com/cenkalti/backoff"
-	"github.com/joehattori/wasmer-go/wasmer"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/abi/linux"
@@ -823,7 +823,7 @@ func (c *Container) waitForStopped() error {
 }
 
 type rustfer struct {
-	instance *wasmer.Instance
+	instance *wasmtime.Instance
 }
 
 // Rustfer is a singleton instance of rustfer.

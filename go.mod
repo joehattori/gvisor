@@ -8,6 +8,7 @@ require (
 	github.com/Microsoft/go-winio v0.4.16 // indirect
 	github.com/Microsoft/hcsshim v0.8.14 // indirect
 	github.com/bazelbuild/rules_go v0.26.0
+	github.com/bytecodealliance/wasmtime-go v0.26.0
 	github.com/cenkalti/backoff v1.1.1-0.20190506075156-2146c9339422
 	github.com/containerd/cgroups v0.0.0-20201119153540-4cbc285b3327 // indirect
 	github.com/containerd/console v1.0.1 // indirect
