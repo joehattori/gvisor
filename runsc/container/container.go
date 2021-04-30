@@ -28,7 +28,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bytecodealliance/wasmtime-go"
 	"github.com/cenkalti/backoff"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
@@ -822,48 +821,7 @@ func (c *Container) waitForStopped() error {
 	return backoff.Retry(op, b)
 }
 
-type rustfer struct {
-	instance *wasmtime.Instance
-}
-
-// Rustfer is a singleton instance of rustfer.
-// var Rustfer *rustfer = nil
-
-// func initWasm() {
-// 	engine := wasmer.NewEngine()
-// 	store := wasmer.NewStore(engine)
-// 	module, err := wasmer.NewModule(store, wasm.wasmBytes)
-// 	wasiEnv, err := wasmer.NewWasiStateBuilder("program").
-// 		InheritStdout().
-// 		InheritStderr().
-// 		MapDirectory(".", ".").
-// 		Finalize()
-// 	check(err)
-// 	importObject, err := wasiEnv.GenerateImportObject(store, module)
-// 	check(err)
-// 	instance, err := wasmer.NewInstance(module, importObject)
-// 	check(err)
-// 	start, err := instance.Exports.GetWasiStartFunction()
-// 	check(err)
-// 	_, err = start()
-// 	check(err)
-// 	memory, err := instance.Exports.GetMemory("memory")
-// 	check(err)
-// 	if memory == nil {
-// 		panic("memory is nil")
-// 	}
-// 	Rustfer = &rustfer{instance}
-// }
-
-func check(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
 func (c *Container) createGoferProcess(spec *specs.Spec, conf *config.Config, bundleDir string, attached bool) ([]*os.File, *os.File, error) {
-	// Load wasm on Gofer creation
-	// initWasm()
 
 	// Start with the general config flags.
 	args := conf.ToFlags()

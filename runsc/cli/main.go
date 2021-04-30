@@ -28,6 +28,7 @@ import (
 	"github.com/google/subcommands"
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/log"
+	"gvisor.dev/gvisor/pkg/p9"
 	"gvisor.dev/gvisor/pkg/refs"
 	"gvisor.dev/gvisor/pkg/sentry/platform"
 	"gvisor.dev/gvisor/runsc/cmd"
@@ -54,6 +55,11 @@ var (
 
 // Main is the main entrypoint.
 func Main(version string) {
+	if os.Getpid() == 1 {
+		p9.WasmBytes, _ = ioutil.ReadFile("/root/rustfer.wasm")
+		log.Infof("WasmBytes loaded. Byte length: %v", len(p9.WasmBytes))
+	}
+
 	// Help and flags commands are generated automatically.
 	help := cmd.NewHelp(subcommands.DefaultCommander)
 	help.Register(new(cmd.Syscalls))

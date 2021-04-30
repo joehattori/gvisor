@@ -11,6 +11,7 @@ go_library(
     ],
     deps = [
         "//pkg/log",
+        "//pkg/p9",
         "//pkg/refs",
         "//pkg/sentry/platform",
         "//runsc/cmd",

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/bytecodealliance/wasmtime-go"
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/flipcall"
 	"gvisor.dev/gvisor/pkg/log"
@@ -576,4 +577,38 @@ func (c *Client) Close() {
 		log.Warningf("Socket.Shutdown() failed (FD: %d): %v", c.socket.FD(), err)
 	}
 	c.closedWg.Wait()
+}
+
+var rustfer struct {
+	instance *wasmtime.Instance
+}
+
+func initWasm() {
+	stdoutPath := "/tmp/runsc/stdout.log"
+
+	engine := wasmtime.NewEngine()
+	store := wasmtime.NewStore(engine)
+	linker := wasmtime.NewLinker(store)
+	wasiConfig := wasmtime.NewWasiConfig()
+	wasiConfig.SetStdoutFile(stdoutPath)
+
+	wasi, err := wasmtime.NewWasiInstance(store, wasiConfig, "wasi_snapshot_preview1")
+	check(err)
+
+	err = linker.DefineWasi(wasi)
+	check(err)
+
+	module, err := wasmtime.NewModule(store.Engine, WasmBytes)
+	check(err)
+	instance, err := linker.Instantiate(module)
+	check(err)
+
+	rustfer.instance = instance
+	log.Infof("rustfer initialization done")
+}
+
+func check(e error) {
+	if e != nil {
+		panic(e)
+	}
 }

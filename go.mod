@@ -34,7 +34,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.0 // indirect
 	github.com/joehattori/wasmer-go v1.0.4
 	github.com/kr/pty v1.1.4-0.20190131011033-7dc38fb350b1
-	github.com/mattbaird/jsonpatch v0.0.0-20171005235357-81af80346b1a // indirect
+	github.com/mattbaird/jsonpatch v0.0.0-20171005235357-81af80346b1a
 	github.com/mohae/deepcopy v0.0.0-20170308212314-bb9b5e7adda9
 	github.com/opencontainers/image-spec v1.0.1 // indirect
 	github.com/opencontainers/runc v0.1.1 // indirect
@@ -56,9 +56,9 @@ require (
 	google.golang.org/protobuf v1.25.1-0.20201020201750-d3470999428b
 	gopkg.in/yaml.v2 v2.2.8 // indirect
 	honnef.co/go/tools v0.1.1
-	k8s.io/api v0.16.13 // indirect
-	k8s.io/apimachinery v0.16.14-rc.0 // indirect
-	k8s.io/client-go v0.16.13 // indirect
+	k8s.io/api v0.16.13
+	k8s.io/apimachinery v0.16.14-rc.0
+	k8s.io/client-go v0.16.13
 )
 
 replace gvisor.dev/gvisor => ./

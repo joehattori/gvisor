@@ -1171,3 +1171,6 @@ func (a *AllocateMode) encode(b *buffer) {
 	}
 	b.Write32(mask)
 }
+
+// WasmBytes is the bytes for wasm program
+var WasmBytes []byte
