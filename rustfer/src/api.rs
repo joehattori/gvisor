@@ -5,7 +5,7 @@ use std::os::raw::{c_char, c_int, c_void};
 use crate::connection::{ConnState, Server};
 use crate::filter::{install, install_uds_filters};
 use crate::message::{
-    handle, Request, Tattach, Tauth, Tclunk, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate,
+    handle, Tattach, Tauth, Tclunk, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate,
 };
 use crate::rustfer::{
     is_read_only_mount, resolve_mounts, write_mounts, AttachPoint, AttachPointConfig, Config,

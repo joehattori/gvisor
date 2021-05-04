@@ -16,12 +16,12 @@ go_library(
         "messages.go",
         "p9.go",
         "path_tree.go",
+        "rustfer.go",
         "server.go",
         "transport.go",
         "transport_flipcall.go",
         "version.go",
     ],
-    cgo = True,
     deps = [
         "//pkg/fd",
         "//pkg/fdchannel",

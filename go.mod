@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	cloud.google.com/go v0.75.0 // indirect
+	cloud.google.com/go/bigquery v1.8.0
 	github.com/BurntSushi/toml v0.3.1 // indirect
 	github.com/Microsoft/go-winio v0.4.16 // indirect
 	github.com/Microsoft/hcsshim v0.8.14 // indirect
@@ -51,7 +52,7 @@ require (
 	golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0
 	golang.org/x/tools v0.1.0
-	google.golang.org/api v0.36.0 // indirect
+	google.golang.org/api v0.36.0
 	google.golang.org/grpc v1.36.0-dev.0.20210208035533-9280052d3665 // indirect
 	google.golang.org/protobuf v1.25.1-0.20201020201750-d3470999428b
 	gopkg.in/yaml.v2 v2.2.8 // indirect

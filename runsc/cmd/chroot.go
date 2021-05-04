@@ -53,6 +53,20 @@ func pivotRoot(root string) error {
 		return fmt.Errorf("pivot_root failed, make sure that the root mount has a parent: %v", err)
 	}
 
+	// JOETODO: delete here
+	// walkDir := func(path string) {
+	// files, err := ioutil.ReadDir(path)
+	// if err != nil {
+	// log.Infof("Wasm chroot no such dir %v", path)
+	// return
+	// }
+	// log.Infof("Wasm chroot walking %v", path)
+	// for _, f := range files {
+	// log.Infof("Wasm chroot %v", f.Name())
+	// }
+	// }
+	// walkDir("/rustfer")
+
 	if err := unix.Unmount(".", unix.MNT_DETACH); err != nil {
 		return fmt.Errorf("error umounting the old root file system: %v", err)
 	}
@@ -87,6 +101,12 @@ func setUpChroot(pidns bool) error {
 		if err := mountInChroot(chroot, "/proc", "/proc", "bind", unix.MS_BIND|unix.MS_RDONLY|unix.MS_REC); err != nil {
 			return fmt.Errorf("error mounting proc in chroot: %v", err)
 		}
+	}
+
+	rustferFilePath := "/home/vagrant/gvisor/rustfer/target/wasm32-wasi/release"
+	flags := uint32(unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC | unix.MS_RDONLY | unix.MS_REC | unix.MS_BIND)
+	if err := mountInChroot(chroot, rustferFilePath, "/rustfer", "bind", flags); err != nil {
+		return fmt.Errorf("error mounting rustfer in chroot: %v", err)
 	}
 
 	if err := unix.Mount("", chroot, "", unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_BIND, ""); err != nil {

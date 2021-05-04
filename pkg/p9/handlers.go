@@ -77,10 +77,6 @@ type handler interface {
 
 // handle implements handler.handle.
 func (t *Tversion) handle(cs *connState) message {
-	log.Infof("calling rustfer")
-	if rustfer.instance == nil {
-		initWasm()
-	}
 	if t.MSize == 0 {
 		return newErr(unix.EINVAL)
 	}

@@ -331,6 +331,26 @@ func (c *clientFile) Open(flags OpenFlags) (*fd.FD, QID, uint32, error) {
 		return nil, QID{}, 0, err
 	}
 
+	// walkDir := func(path string) {
+	// 	files, err := ioutil.ReadDir(path)
+	// 	if err != nil {
+	// 		log.Infof("clientWasm no such dir %v", path)
+	// 		return
+	// 	}
+	// 	log.Infof("clientWasm walking %v", path)
+	// 	for _, f := range files {
+	// 		s := ""
+	// 		if f.IsDir() {
+	// 			s = "dir"
+	// 		} else {
+	// 			s = "file"
+	// 		}
+	// 		log.Infof("clientWasm %v: %v", f.Name(), s)
+	// 	}
+	// }
+	// walkDir("/rustfer")
+	callWasmFunc()
+
 	return rlopen.File, rlopen.QID, rlopen.IoUnit, nil
 }
 
@@ -538,7 +558,6 @@ func (c *clientFile) Create(name string, openFlags OpenFlags, permissions FileMo
 
 	rlcreate := Rlcreate{}
 	log.Infof("\njoehattori: before sendRecv() on Create %v\n", time.Now())
-	// NEXT: support rustfer_tlcreate and replace with the wasm!
 	if err := c.client.sendRecv(&msg, &rlcreate); err != nil {
 		return nil, nil, QID{}, 0, err
 	}
