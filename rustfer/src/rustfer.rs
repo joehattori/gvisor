@@ -20,32 +20,26 @@ pub const OPEN_FLAGS: i32 = unix::O_NOFOLLOW | unix::O_CLOEXEC;
 pub const ALLOWED_OPEN_FLAGS: i32 = unix::O_TRUNC;
 
 pub struct Rustfer {
-    bundle_dir: String,
-    io_fds: Vec<i32>,
+    // bundle_dir: String,
+    io_fds: Vec<i8>,
     apply_caps: bool,
     set_up_root: bool,
-    spec_fd: i32,
-    mounts_fd: i32,
 }
 
 static APP: OnceCell<Mutex<Rustfer>> = OnceCell::new();
 
 impl Rustfer {
     pub fn init(
-        bundle_dir: String,
-        io_fds: Vec<i32>,
+        // bundle_dir: String,
+        io_fds: Vec<i8>,
         apply_caps: bool,
         set_up_root: bool,
-        spec_fd: i32,
-        mounts_fd: i32,
     ) -> Result<(), Mutex<Self>> {
         let r = Rustfer {
-            bundle_dir,
+            // bundle_dir,
             io_fds,
             apply_caps,
             set_up_root,
-            spec_fd,
-            mounts_fd,
         };
         APP.set(Mutex::new(r))
     }
@@ -58,7 +52,7 @@ impl Rustfer {
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     root_dir: String,
-    trace_back: String,
+    traceback: String,
     debug: bool,
     log_file_name: String,
     log_format: String,
@@ -107,7 +101,7 @@ impl Config {
         }
         match name {
             "root" => self.root_dir = value.parse().unwrap(),
-            "traceback" => self.trace_back = value.parse().unwrap(),
+            "traceback" => self.traceback = value.parse().unwrap(),
             "debug" => self.debug = value.parse().unwrap(),
             "log" => self.log_file_name = value.parse().unwrap(),
             "log-format" => self.log_format = value.parse().unwrap(),
@@ -159,9 +153,10 @@ impl Config {
 // pub fn setup_root_fs(spec: Spec, conf: Config) -> Result<(), &str> {}
 
 pub fn write_mounts(mounts: &Vec<Mount>) -> io::Result<()> {
-    let bytes = serde_json::to_string(mounts).expect("couldn't serialize mounts to json.");
-    let mut file = StdFile::open("mounts file")?;
-    file.write_all(bytes.as_bytes())?;
+    // JOETODO: what do you mean by writing to a ro mount.
+    // let bytes = serde_json::to_string(mounts).expect("couldn't serialize mounts to json.");
+    // let mut file = StdFile::create("mountsfile")?;
+    // file.write_all(bytes.as_bytes())?;
     Ok(())
 }
 
@@ -189,6 +184,7 @@ pub fn resolve_mounts<'a>(
                     Err(_) => return Err("resolving symlinks"),
                 };
                 let rel_dst = Path::new(&dst).strip_prefix(&root).unwrap_or_else(|e| {
+                    eprintln!("{} could not be made relative to {}: {}", dst, root, e);
                     panic!("{} could not be made relative to {}: {}", dst, root, e)
                 });
                 let path = Path::new(&root);
@@ -219,8 +215,9 @@ fn resolve_symlinks<'a>(
     if follow_count == 0 {
         return Err("too many symlinks to follow");
     }
-    let rel = Path::new(&rel).canonicalize().unwrap();
-    for name in rel.iter() {
+    // JOETODO: canonicalize() is not supported on this platform.
+    // let rel = Path::new(&rel).canonicalize().unwrap();
+    for name in Path::new(&rel).iter() {
         if name == OsStr::new(&path::MAIN_SEPARATOR.to_string()) {
             continue;
         }

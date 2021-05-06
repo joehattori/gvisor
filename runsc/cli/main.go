@@ -17,6 +17,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -113,6 +114,18 @@ func Main(version string) {
 	conf, err := config.NewFromFlags()
 	if err != nil {
 		cmd.Fatalf(err.Error())
+	}
+
+	if _, err := os.Stat("./config/conf.json"); os.IsNotExist(err) {
+		b, err := json.Marshal(conf)
+		if err != nil {
+			cmd.Fatalf(err.Error())
+		}
+		if err = ioutil.WriteFile("./conf.json", b, 0666); err != nil {
+			log.Infof("failed to create and write to conf.json: %v", err)
+		}
+	} else if err == nil {
+		log.Infof("./config/conf.json exists!")
 	}
 
 	// TODO(gvisor.dev/issue/193): support systemd cgroups

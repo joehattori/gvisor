@@ -8,46 +8,52 @@ use std::path::Path;
 use crate::rustfer::Config;
 use crate::unix;
 
-use oci_spec::runtime::{Mount, Root, Spec};
+use oci_spec::runtime::{Mount, Spec};
 use once_cell::sync::Lazy;
 
+fn format_spec_str(spec: String) -> String {
+    spec.replace("\"action\"", "\"actions\"")
+}
+
 pub fn read_spec_from_file(
-    bundle_dir: &str,
+    //bundle_dir: &str,
     mut spec_file: File,
     conf: &mut Config,
 ) -> io::Result<Spec> {
     spec_file.seek(SeekFrom::Start(0))?;
     let mut spec_buf = String::new();
     spec_file.read_to_string(&mut spec_buf)?;
+    spec_buf = format_spec_str(spec_buf);
     let mut spec: Spec = serde_json::from_str(&spec_buf)?;
-    if validate_spec(&spec).is_err() {
+    if let Err(err) = validate_spec(&spec) {
+        println!("invalid spec: {}", err);
         return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid spec."));
     }
-    let root = match spec.root {
-        None => {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "Spec.root shouldn't be empty.",
-            ))
-        }
-        Some(root) => root,
-    };
-    spec.root = Some(Root {
-        path: abs_path(bundle_dir, &root.path).to_string(),
-        ..root
-    });
-    if let Some(ref mut mounts) = &mut spec.mounts {
-        for mut m in mounts {
-            let default = Some(abs_path(bundle_dir, &root.path).to_string());
-            m.source = m.source.clone().map_or(default.clone(), |s| {
-                if s.is_empty() {
-                    default.clone()
-                } else {
-                    Some(s)
-                }
-            });
-        }
-    }
+    // let root = match spec.root {
+    //     None => {
+    //         return Err(io::Error::new(
+    //             io::ErrorKind::NotFound,
+    //             "Spec.root shouldn't be empty.",
+    //         ))
+    //     }
+    //     Some(root) => root,
+    // };
+    // spec.root = Some(Root {
+    //     path: abs_path(bundle_dir, &root.path).to_string(),
+    //     ..root
+    // });
+    // if let Some(ref mut mounts) = &mut spec.mounts {
+    //     for mut m in mounts {
+    //         let default = Some(abs_path(bundle_dir, &root.path).to_string());
+    //         m.source = m.source.clone().map_or(default.clone(), |s| {
+    //             if s.is_empty() {
+    //                 default.clone()
+    //             } else {
+    //                 Some(s)
+    //             }
+    //         });
+    //     }
+    // }
     const FLAG_PREFIX: &str = "dev.gvisor.flag.";
     if let Some(annotations) = &spec.annotations {
         for (annotation, val) in annotations.iter() {
@@ -77,7 +83,7 @@ fn validate_spec(spec: &Spec) -> Result<(), &str> {
             if process.args.is_none() {
                 return Err("Spec.process.args must be defined.");
             }
-            if process.selinux_label.is_none() {
+            if process.selinux_label.is_some() {
                 return Err("SELinux is not supported.");
             }
             if let Some(apparmor_profile) = &process.apparmor_profile {
@@ -104,10 +110,10 @@ fn validate_spec(spec: &Spec) -> Result<(), &str> {
         }
         None => return Err("Spec.root must be defined."),
     };
-    if spec.solaris.is_none() {
+    if spec.solaris.is_some() {
         return Err("Spec.solaris is not supported.");
     }
-    if spec.windows.is_none() {
+    if spec.windows.is_some() {
         return Err("Spec.windows is not supported.");
     }
     if let Some(linux) = &spec.linux {
@@ -523,7 +529,8 @@ fn sandbox_id(spec: &Spec) -> Option<String> {
 
 pub fn is_supported_dev_mount(m: &Mount) -> bool {
     let dst = m.destination.clone();
-    let dst = Path::new(&dst).canonicalize().unwrap();
+    // JOETODO: canonicalize() is not supported on this platform.
+    // let dst = Path::new(&dst).canonicalize().unwrap();
     let existing_devices = [
         "/dev/fd",
         "/dev/stdin",
@@ -538,7 +545,8 @@ pub fn is_supported_dev_mount(m: &Mount) -> bool {
         "/dev/ptmx",
     ];
     existing_devices.iter().all(|&dev| {
-        dst.to_str().unwrap() != dev && !dst.to_str().unwrap().starts_with(&format!("{}/", dev))
+        let dst = dst.as_str();
+        dst != dev && !dst.starts_with(&format!("{}/", dev))
     })
 }
 

@@ -29,33 +29,34 @@ fn rustfer_deallocate(pointer: *mut c_void, capacity: usize) {
     }
 }
 
+#[no_mangle]
+fn healthcheck() -> i8 {
+    12
+}
+
 // rustfer_init corresponds to Gofer.Execute in Gofer.
 #[no_mangle]
 fn rustfer_init(
-    bundle_dir_ptr: *mut c_char,
-    io_fds_ptr: *mut c_int,
+    //bundle_dir_ptr: *mut c_char,
     io_fds_len: i32,
+    io_fds_ptr: *mut i8,
     apply_caps: bool,
     set_up_root: bool,
-    spec_fd: i32,
-    mounts_fd: i32,
     config: *mut c_char,
 ) {
-    let bundle_dir = unsafe { CStr::from_ptr(bundle_dir_ptr) }
-        .to_str()
-        .unwrap()
-        .to_string();
+    // let bundle_dir = unsafe { CStr::from_ptr(bundle_dir_ptr) }
+    //     .to_str()
+    //     .unwrap()
+    //     .to_string();
     let mut io_fds = Vec::new();
     for i in 0..io_fds_len {
         unsafe { io_fds.push(*io_fds_ptr.offset(i as isize)) }
     }
     if Rustfer::init(
-        bundle_dir.clone(),
+        // bundle_dir.clone(),
         io_fds.clone(),
         apply_caps,
         set_up_root,
-        spec_fd,
-        mounts_fd,
     )
     .is_err()
     {
@@ -63,8 +64,8 @@ fn rustfer_init(
     }
     let config = unsafe { CStr::from_ptr(config) }.to_str().unwrap();
     let mut config: Config = serde_json::from_str(&config).unwrap();
-    let spec_file = File::open("spec file").expect("no such file named \"spec file\"");
-    let mut spec = read_spec_from_file(&bundle_dir, spec_file, &mut config)
+    let spec_file = File::open("/config/config.json").expect("no such file named \"spec file\"");
+    let mut spec = read_spec_from_file(/*&bundle_dir, */spec_file, &mut config)
         .unwrap_or_else(|e| panic!("reading spec {}", e));
     if set_up_root {
         // TODO: setup_root_fs(spec, config).unwrap_or_else(|e| panic!("Error setting up root FS: {}", e));
@@ -160,9 +161,9 @@ fn rustfer_init(
     configure_server(ats, io_fds);
 }
 
-fn configure_server(ats: Vec<AttachPoint>, io_fds: Vec<i32>) {
+fn configure_server(ats: Vec<AttachPoint>, io_fds: Vec<i8>) {
     for i in 0..ats.len() {
-        let io_fd = io_fds[i];
+        let io_fd = io_fds[i] as i32;
         let at = &ats[i];
         let server = Server::new(Box::new(at.clone()));
         let conn_state = ConnState::new(server);

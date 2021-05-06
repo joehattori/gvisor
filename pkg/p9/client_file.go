@@ -349,7 +349,9 @@ func (c *clientFile) Open(flags OpenFlags) (*fd.FD, QID, uint32, error) {
 	// 	}
 	// }
 	// walkDir("/rustfer")
-	callWasmFunc()
+	if err := callWasmFunc(tlopen); err != nil {
+		return nil, QID{}, 0, err
+	}
 
 	return rlopen.File, rlopen.QID, rlopen.IoUnit, nil
 }

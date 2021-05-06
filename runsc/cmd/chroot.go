@@ -109,6 +109,14 @@ func setUpChroot(pidns bool) error {
 		return fmt.Errorf("error mounting rustfer in chroot: %v", err)
 	}
 
+	cw, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("error getting current directory %v", err)
+	}
+	if err := mountInChroot(chroot, cw, "/config", "bind", flags); err != nil {
+		return fmt.Errorf("error mouting config in chroot: %v", err)
+	}
+
 	if err := unix.Mount("", chroot, "", unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_BIND, ""); err != nil {
 		return fmt.Errorf("error remounting chroot in read-only: %v", err)
 	}
