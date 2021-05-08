@@ -26,9 +26,9 @@ pub fn read_spec_from_file(
     spec_buf = format_spec_str(spec_buf);
     let mut spec: Spec = serde_json::from_str(&spec_buf)?;
     if let Err(err) = validate_spec(&spec) {
-        println!("invalid spec: {}", err);
         return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid spec."));
     }
+    // JOETODO
     // let root = match spec.root {
     //     None => {
     //         return Err(io::Error::new(

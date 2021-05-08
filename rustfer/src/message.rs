@@ -58,17 +58,11 @@ pub struct QID {
     pub path: u64,
 }
 
-pub fn handle<T: serde_traitobject::Deserialize + Request>(io_fd: i32, mut msg: T) -> *const u8 {
-    let cs = ConnState::get_conn_state(io_fd);
-    let res = msg.handle(&cs);
-    serde_json::to_string(&res).unwrap().as_ptr()
-}
-
 pub trait Request {
-    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any>;
+    fn handle(&mut self, io_fd: i32) -> *const u8;
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Tlopen {
     pub fid: FID,
     pub flags: OpenFlags,
@@ -81,10 +75,11 @@ impl Tlopen {
 }
 
 impl Request for Tlopen {
-    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+    fn handle(&mut self, io_fd: i32) -> *const u8 {
+        let cs = ConnState::get_conn_state(io_fd);
         let mut fid_ref = match cs.lookup_fid(&self.fid) {
             Some(r) => r,
-            None => return serde_traitobject::Box::new(Rlerror::new(unix::EBADF)),
+            None => return Rlerror::new(unix::EBADF).to_json_ptr(),
         };
         // TODO: mutex
         if fid_ref.is_deleted.load(Ordering::Relaxed)
@@ -92,12 +87,13 @@ impl Request for Tlopen {
             || !fid_ref.mode.can_open()
         {
             fid_ref.dec_ref();
-            return serde_traitobject::Box::new(Rlerror::new(unix::EINVAL));
+            return Rlerror::new(unix::EINVAL).to_json_ptr();
         }
+        // TODO: mutex
         if fid_ref.mode.is_dir() {
             if !self.flags.is_read_only() || self.flags.truncated_flag() != 0 {
                 fid_ref.dec_ref();
-                return serde_traitobject::Box::new(Rlerror::new(unix::EISDIR));
+                return Rlerror::new(unix::EISDIR).to_json_ptr();
             }
         }
         match fid_ref.file.open(self.flags) {
@@ -107,17 +103,17 @@ impl Request for Tlopen {
                 let rlopen = Rlopen::new(qid, io_unit);
                 // rlopen.set_file_payload(os_file);
                 fid_ref.dec_ref();
-                serde_traitobject::Box::new(rlopen)
+                rlopen.to_json_ptr()
             }
             Err(err) => {
                 fid_ref.dec_ref();
-                serde_traitobject::Box::new(Rlerror::new(extract_errno(err)))
+                Rlerror::from_err(err).to_json_ptr()
             }
         }
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Tauth {
     authentication_fid: FID,
     user_name: String,
@@ -133,8 +129,8 @@ impl Tauth {
 
 impl Request for Tauth {
     // We don't support authentication, so this just returns ENOSYS.
-    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
-        serde_traitobject::Box::new(Rlerror::new(unix::ENOSYS))
+    fn handle(&mut self, _: i32) -> *const u8 {
+        Rlerror::new(unix::ENOSYS).to_json_ptr()
     }
 }
 
@@ -150,11 +146,12 @@ impl Tclunk {
 }
 
 impl Request for Tclunk {
-    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+    fn handle(&mut self, io_fd: i32) -> *const u8 {
+        let cs = ConnState::get_conn_state(io_fd);
         if !cs.delete_fid(&self.fid) {
-            serde_traitobject::Box::new(Rlerror::new(unix::EBADF))
+            Rlerror::new(unix::EBADF).to_json_ptr()
         } else {
-            serde_traitobject::Box::new(Rclunk {})
+            Rclunk {}.to_json_ptr()
         }
     }
 }
@@ -173,9 +170,10 @@ impl Tsetattrclunk {
 }
 
 impl Request for Tsetattrclunk {
-    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+    fn handle(&mut self, io_fd: i32) -> *const u8 {
+        let cs = ConnState::get_conn_state(io_fd);
         match cs.lookup_fid(&self.fid) {
-            None => errno_to_serde_traitobject(unix::EBADF),
+            None => Rlerror::new(unix::EBADF).to_json_ptr(),
             Some(mut rf) => {
                 // TODO: safetyWrite
                 let set_attr_res = if rf.is_deleted() {
@@ -187,11 +185,11 @@ impl Request for Tsetattrclunk {
                 };
                 rf.dec_ref();
                 if !cs.delete_fid(&self.fid) {
-                    errno_to_serde_traitobject(unix::EBADF)
+                    Rlerror::new(unix::EBADF).to_json_ptr()
                 } else {
                     match set_attr_res {
-                        Ok(_) => serde_traitobject::Box::new(Rsetattrclunk {}),
-                        Err(e) => serde_traitobject::Box::new(e),
+                        Ok(_) => Rsetattrclunk {}.to_json_ptr(),
+                        Err(err) => err.to_json_ptr(),
                     }
                 }
             }
@@ -211,9 +209,10 @@ impl Tremove {
 }
 
 impl Request for Tremove {
-    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+    fn handle(&mut self, io_fd: i32) -> *const u8 {
+        let cs = ConnState::get_conn_state(io_fd);
         match cs.lookup_fid(&self.fid) {
-            None => errno_to_serde_traitobject(unix::EBADF),
+            None => Rlerror::new(unix::EBADF).to_json_ptr(),
             Some(rf) => {
                 // TODO: safelyGlobal
                 let res = if rf.is_root() || rf.is_deleted() {
@@ -231,11 +230,11 @@ impl Request for Tremove {
                     }
                 };
                 if !cs.delete_fid(&self.fid) {
-                    errno_to_serde_traitobject(unix::EBADF)
+                    Rlerror::new(unix::EBADF).to_json_ptr()
                 } else {
                     match res {
-                        Ok(_) => serde_traitobject::Box::new(Rremove {}),
-                        Err(e) => serde_traitobject::Box::new(e),
+                        Ok(_) => Rremove {}.to_json_ptr(),
+                        Err(err) => err.to_json_ptr(),
                     }
                 }
             }
@@ -243,7 +242,7 @@ impl Request for Tremove {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Tattach {
     fid: FID,
     auth: Tauth,
@@ -256,28 +255,35 @@ impl Tattach {
 }
 
 impl Request for Tattach {
-    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
+    fn handle(&mut self, io_fd: i32) -> *const u8 {
+        let cs = ConnState::get_conn_state(io_fd);
+        println!("Tattach 1");
         if self.auth.authentication_fid != NO_FID {
-            return errno_to_serde_traitobject(unix::EINVAL);
+            return Rlerror::new(unix::EINVAL).to_json_ptr();
         }
+        println!("Tattach 2");
         if Path::new(&self.auth.attach_name).is_absolute() {
             self.auth.attach_name = self.auth.attach_name[1..].to_string();
         }
+        println!("Tattach 3");
         let mut file = match cs.server.attacher.attach() {
             Ok(f) => f,
-            Err(errno) => return errno_to_serde_traitobject(extract_errno(errno)),
+            Err(err) => return Rlerror::from_err(err).to_json_ptr(),
         };
+        println!("Tattach 4");
         let (qid, valid, attr) = match file.get_attr(AttrMask::mask_all()) {
             Ok(v) => v,
             Err(errno) => {
                 // file.close();
-                return errno_to_serde_traitobject(extract_errno(errno));
+                return Rlerror::from_err(errno).to_json_ptr();
             }
         };
+        println!("Tattach 5");
         if !valid.file_mode {
             file.close();
-            return errno_to_serde_traitobject(unix::EINVAL);
+            return Rlerror::new(unix::EINVAL).to_json_ptr();
         }
+        println!("Tattach 6");
         let mut root = FIDRef {
             is_deleted: AtomicBool::new(false),
             is_opened: false,
@@ -289,20 +295,24 @@ impl Request for Tattach {
             mode: attr.file_mode.file_type(),
             path_node: cs.server.path_tree.clone(),
         };
+        println!("Tattach 7");
         if self.auth.attach_name.is_empty() {
             cs.insert_fid(&self.fid, &mut root);
+            println!("Tattach 8");
             root.dec_ref();
         } else {
             let (_, mut new_ref, _, _) =
                 match do_walk(&cs, root.clone(), &Path::new(&self.auth.attach_name), false) {
                     Ok(v) => v,
-                    Err(e) => return errno_to_serde_traitobject(extract_errno(e)),
+                    Err(err) => return Rlerror::from_err(err).to_json_ptr(),
                 };
             cs.insert_fid(&self.fid, &mut new_ref);
             new_ref.dec_ref();
             root.dec_ref();
+            println!("Tattach 9");
         }
-        serde_traitobject::Box::new(Rattach { qid })
+        println!("Tattach 10");
+        Rattach::from_qid(qid).to_json_ptr()
     }
 }
 
@@ -457,12 +467,13 @@ impl Tucreate {
 }
 
 impl Request for Tucreate {
-    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
-        let rlcreate = match self.tlcreate.perform(cs, NO_UID) {
+    fn handle(&mut self, io_fd: i32) -> *const u8 {
+        let cs = ConnState::get_conn_state(io_fd);
+        let rlcreate = match self.tlcreate.perform(&cs, NO_UID) {
             Ok(rlcreate) => rlcreate,
-            Err(e) => return errno_to_serde_traitobject(e),
+            Err(errno) => return Rlerror::new(errno).to_json_ptr(),
         };
-        serde_traitobject::Box::new(Rucreate { rlcreate })
+        Rucreate { rlcreate }.to_json_ptr()
     }
 }
 
@@ -529,16 +540,19 @@ impl Tlcreate {
 }
 
 impl Request for Tlcreate {
-    fn handle(&mut self, cs: &ConnState) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
-        let rlcreate = match self.perform(cs, NO_UID) {
+    fn handle(&mut self, io_fd: i32) -> *const u8 {
+        let cs = ConnState::get_conn_state(io_fd);
+        let rlcreate = match self.perform(&cs, NO_UID) {
             Ok(rlcreate) => rlcreate,
-            Err(e) => return errno_to_serde_traitobject(e),
+            Err(errno) => return Rlerror::new(errno).to_json_ptr(),
         };
-        serde_traitobject::Box::new(rlcreate)
+        rlcreate.to_json_ptr()
     }
 }
 
-pub trait Response: serde_traitobject::Serialize + serde_traitobject::Deserialize {}
+pub trait Response: serde_traitobject::Serialize + serde_traitobject::Deserialize {
+    fn to_json_ptr(&self) -> *const u8;
+}
 
 // NEXT: here! do we need StdFile in Rlopen? maybe unneeded in a demo projec?
 #[derive(Serialize, Deserialize)]
@@ -555,27 +569,74 @@ impl Rlopen {
     //  pub fn set_file_payload(&mut self, fd: Option<StdFile>) {
     //      self.file = fd;
     //  }
+    fn to_json_ptr(&self) -> *const u8 {
+        serde_json::to_string(self)
+            .expect("failed to convert to json.")
+            .as_ptr()
+    }
 }
 
-impl Response for Rlopen {}
+impl Response for Rlopen {
+    fn to_json_ptr(&self) -> *const u8 {
+        serde_json::to_string(self)
+            .expect("failed to convert to json.")
+            .as_ptr()
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rclunk {}
-impl Response for Rclunk {}
+impl Response for Rclunk {
+    fn to_json_ptr(&self) -> *const u8 {
+        serde_json::to_string(self)
+            .expect("failed to convert to json.")
+            .as_ptr()
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rsetattrclunk {}
-impl Response for Rsetattrclunk {}
+impl Response for Rsetattrclunk {
+    fn to_json_ptr(&self) -> *const u8 {
+        serde_json::to_string(self)
+            .expect("failed to convert to json.")
+            .as_ptr()
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rremove {}
-impl Response for Rremove {}
+impl Response for Rremove {
+    fn to_json_ptr(&self) -> *const u8 {
+        serde_json::to_string(self)
+            .expect("failed to convert to json.")
+            .as_ptr()
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rattach {
-    qid: QID,
+    // embedding QID. need this to match Go implementation in pkg/p9.
+    pub typ: QIDType,
+    pub version: u32,
+    pub path: u64,
 }
-impl Response for Rattach {}
+impl Rattach {
+    fn from_qid(qid: QID) -> Self {
+        Self {
+            typ: qid.typ,
+            version: qid.version,
+            path: qid.path,
+        }
+    }
+}
+impl Response for Rattach {
+    fn to_json_ptr(&self) -> *const u8 {
+        serde_json::to_string(self)
+            .expect("failed to convert to json.")
+            .as_ptr()
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rlcreate {
@@ -585,13 +646,24 @@ impl Rlcreate {
     //fn set_file_payload(&mut self, fd: Option<Fd>) {
     //    self.rlopen.set_file_payload(fd)
     //}
+    fn to_json_ptr(&self) -> *const u8 {
+        serde_json::to_string(self)
+            .expect("failed to convert to json.")
+            .as_ptr()
+    }
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Rucreate {
     rlcreate: Rlcreate,
 }
-impl Response for Rucreate {}
+impl Response for Rucreate {
+    fn to_json_ptr(&self) -> *const u8 {
+        serde_json::to_string(self)
+            .expect("failed to convert to json.")
+            .as_ptr()
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rlerror {
@@ -600,11 +672,23 @@ pub struct Rlerror {
 
 impl Rlerror {
     pub fn new(error: i32) -> Self {
-        Rlerror { error }
+        Self { error }
+    }
+
+    fn from_err(err: Error) -> Self {
+        Self {
+            error: extract_errno(err),
+        }
     }
 }
 
-impl Response for Rlerror {}
+impl Response for Rlerror {
+    fn to_json_ptr(&self) -> *const u8 {
+        serde_json::to_string(self)
+            .expect("failed to convert to json.")
+            .as_ptr()
+    }
+}
 
 fn extract_errno(err: Error) -> i32 {
     err.raw_os_error().unwrap_or(unix::EIO)

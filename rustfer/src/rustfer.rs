@@ -360,6 +360,7 @@ impl Attacher for AttachPoint {
             ));
         }
         let prefix = self.prefix.to_owned();
+        println!("prefix: {}", prefix);
         let (file, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
             option.open(&prefix)
         }))?;
@@ -439,7 +440,10 @@ pub fn open_any_file<'a>(
     let mut error = io::Error::new(io::ErrorKind::Other, "");
     for mode in modes.iter() {
         match f(mode.open_option) {
-            Ok(file) => return Ok((file, mode.readable)),
+            Ok(file) => {
+                println!("Attempt to open file succeed!");
+                return Ok((file, mode.readable));
+            }
             Err(err) => {
                 if err.raw_os_error() == Some(unix::ENOENT) {
                     return Err(err);

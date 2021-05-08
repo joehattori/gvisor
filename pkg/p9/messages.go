@@ -429,7 +429,7 @@ func (r *Rremove) String() string {
 //
 // Note that this replaces the error code used in 9p.
 type Rlerror struct {
-	Error uint32
+	Error uint32 `json:"error"`
 }
 
 // decode implements encoder.decode.
@@ -455,16 +455,16 @@ func (r *Rlerror) String() string {
 // Tauth is an authentication request.
 type Tauth struct {
 	// AuthenticationFID is the FID to attach the authentication result.
-	AuthenticationFID FID
+	AuthenticationFID FID `json:"authentication_fid"`
 
 	// UserName is the user to attach.
-	UserName string
+	UserName string `json:"user_name"`
 
 	// AttachName is the attach name.
-	AttachName string
+	AttachName string `json:"attach_name"`
 
 	// UserID is the numeric identifier for UserName.
-	UID UID
+	UID UID `json:"uid"`
 }
 
 // decode implements encoder.decode.
@@ -513,12 +513,12 @@ func (r *Rauth) String() string {
 // Tattach is an attach request.
 type Tattach struct {
 	// FID is the FID to be attached.
-	FID FID
+	FID FID `json:"fid"`
 
 	// Auth is the embedded authentication request.
 	//
 	// See client.Attach for information regarding authentication.
-	Auth Tauth
+	Auth Tauth `json:"auth"`
 }
 
 // decode implements encoder.decode.
@@ -561,10 +561,10 @@ func (r *Rattach) String() string {
 // Tlopen is an open request.
 type Tlopen struct {
 	// FID is the FID to be opened.
-	FID FID
+	FID FID `json:"fid"`
 
 	// Flags are the open flags.
-	Flags OpenFlags
+	Flags OpenFlags `json:"flags"`
 }
 
 // decode implements encoder.decode.
@@ -592,10 +592,10 @@ func (t *Tlopen) String() string {
 // Rlopen is a open response.
 type Rlopen struct {
 	// QID is the file's QID.
-	QID QID
+	QID QID `json:qid`
 
 	// IoUnit is the recommended I/O unit.
-	IoUnit uint32
+	IoUnit uint32 `json:io_unit`
 
 	filePayload
 }

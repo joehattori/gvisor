@@ -35,8 +35,13 @@ func (c *Client) Attach(name string) (File, error) {
 	}
 
 	rattach := Rattach{}
+	log.Infof("\njoehattori: before sendRecv() on Attach %v\n", time.Now())
 	if err := c.sendRecv(&Tattach{FID: FID(fid), Auth: Tauth{AttachName: name, AuthenticationFID: NoFID, UID: NoUID}}, &rattach); err != nil {
 		c.fidPool.Put(fid)
+		return nil, err
+	}
+
+	if err := callWasmFunc(c.socket.FD(), &Tattach{FID: FID(fid), Auth: Tauth{AttachName: name, AuthenticationFID: NoFID, UID: NoUID}}, &rattach); err != nil {
 		return nil, err
 	}
 
@@ -319,6 +324,11 @@ func (c *clientFile) SetAttrClose(valid SetAttrMask, attr SetAttr) error {
 	return nil
 }
 
+var (
+	before, after time.Duration
+	count         int64
+)
+
 // Open implements File.Open.
 func (c *clientFile) Open(flags OpenFlags) (*fd.FD, QID, uint32, error) {
 	if atomic.LoadUint32(&c.closed) != 0 {
@@ -327,31 +337,27 @@ func (c *clientFile) Open(flags OpenFlags) (*fd.FD, QID, uint32, error) {
 
 	rlopen := Rlopen{}
 	log.Infof("\njoehattori: before sendRecv() on Open %v\n", time.Now())
+	count++
+	start := time.Now()
 	if err := c.client.sendRecv(&Tlopen{FID: c.fid, Flags: flags}, &rlopen); err != nil {
 		return nil, QID{}, 0, err
 	}
+	if count > 1 {
+		before += time.Since(start)
+		log.Infof("joecli:average of %v", count)
+		log.Infof("joecli:before: %v µs", before.Microseconds()/count)
+	}
 
-	// walkDir := func(path string) {
-	// 	files, err := ioutil.ReadDir(path)
-	// 	if err != nil {
-	// 		log.Infof("clientWasm no such dir %v", path)
-	// 		return
-	// 	}
-	// 	log.Infof("clientWasm walking %v", path)
-	// 	for _, f := range files {
-	// 		s := ""
-	// 		if f.IsDir() {
-	// 			s = "dir"
-	// 		} else {
-	// 			s = "file"
-	// 		}
-	// 		log.Infof("clientWasm %v: %v", f.Name(), s)
-	// 	}
-	// }
-	// walkDir("/rustfer")
-	if err := callWasmFunc(tlopen); err != nil {
+	log.Infof("rustferopen before: %v", rlopen)
+	start = time.Now()
+	if err := callWasmFunc(c.client.socket.FD(), &Tlopen{FID: c.fid, Flags: flags}, &rlopen); err != nil {
 		return nil, QID{}, 0, err
 	}
+	if count > 1 {
+		after += time.Since(start)
+		log.Infof("joecli:after : %v µs", after.Microseconds()/count)
+	}
+	log.Infof("rustferopen atfer: %v", rlopen)
 
 	return rlopen.File, rlopen.QID, rlopen.IoUnit, nil
 }
@@ -552,6 +558,7 @@ func (c *clientFile) Create(name string, openFlags OpenFlags, permissions FileMo
 	if versionSupportsTucreation(c.client.version) {
 		msg.GID = gid
 		rucreate := Rucreate{}
+		log.Infof("\njoehattori: before sendRecv() on Create (Tucreation) %v\n", time.Now())
 		if err := c.client.sendRecv(&Tucreate{Tlcreate: msg, UID: uid}, &rucreate); err != nil {
 			return nil, nil, QID{}, 0, err
 		}
@@ -559,7 +566,7 @@ func (c *clientFile) Create(name string, openFlags OpenFlags, permissions FileMo
 	}
 
 	rlcreate := Rlcreate{}
-	log.Infof("\njoehattori: before sendRecv() on Create %v\n", time.Now())
+	log.Infof("\njoehattori: before sendRecv() on Create (Tlcreation) %v\n", time.Now())
 	if err := c.client.sendRecv(&msg, &rlcreate); err != nil {
 		return nil, nil, QID{}, 0, err
 	}

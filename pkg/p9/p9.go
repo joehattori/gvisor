@@ -438,13 +438,13 @@ const (
 // This may be embedded in other requests and responses.
 type QID struct {
 	// Type is the highest order byte of the file mode.
-	Type QIDType
+	Type QIDType `json:"typ"`
 
 	// Version is an arbitrary server version number.
-	Version uint32
+	Version uint32 `json:"version"`
 
 	// Path is a unique server identifier for this path (e.g. inode).
-	Path uint64
+	Path uint64 `json:"path"`
 }
 
 // String implements fmt.Stringer.

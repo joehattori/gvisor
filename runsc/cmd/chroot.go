@@ -15,10 +15,14 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/runsc/specutils"
@@ -103,6 +107,7 @@ func setUpChroot(pidns bool) error {
 		}
 	}
 
+	// JOETODO: serialize module instead of reading it from wasm.
 	rustferFilePath := "/home/vagrant/gvisor/rustfer/target/wasm32-wasi/release"
 	flags := uint32(unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC | unix.MS_RDONLY | unix.MS_REC | unix.MS_BIND)
 	if err := mountInChroot(chroot, rustferFilePath, "/rustfer", "bind", flags); err != nil {
@@ -117,9 +122,44 @@ func setUpChroot(pidns bool) error {
 		return fmt.Errorf("error mouting config in chroot: %v", err)
 	}
 
+	if err := os.Mkdir(filepath.Join(chroot, "/etc"), 0700); err != nil {
+		return fmt.Errorf("error creating /etc in chroot: %v", err)
+	}
+
+	if err := ioutil.WriteFile(filepath.Join(chroot, "/etc/resolv.conf"), []byte("nameserver 8.8.8.8\n"), 0666); err != nil {
+		return fmt.Errorf("error writing to /etc/resolv.conf: %v", err)
+	}
+
+	if err := ioutil.WriteFile(filepath.Join(chroot, "/etc/hostname"), []byte(cid+"\n"), 0600); err != nil {
+		return fmt.Errorf("error writing to /etc/hostname: %v", err)
+	}
+
+	hosts := fmt.Sprintf("127.0.0.1\tlocalhost\n%s\t%s\n", "192.168.10.2", cid)
+	if err := ioutil.WriteFile(filepath.Join(chroot, "/etc/hosts"), []byte(hosts), 0600); err != nil {
+		return fmt.Errorf("error writing to /etc/hostname: %v", err)
+	}
+
 	if err := unix.Mount("", chroot, "", unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_BIND, ""); err != nil {
 		return fmt.Errorf("error remounting chroot in read-only: %v", err)
 	}
 
 	return pivotRoot(chroot)
+}
+
+func readETCMounts(bundleDir string) (mounts []specs.Mount, err error) {
+	var bytes []byte
+	bytes, err = ioutil.ReadFile(filepath.Join(bundleDir, "/config.json"))
+	if err != nil {
+		return
+	}
+	spec := &specs.Spec{}
+	if err = json.Unmarshal(bytes, spec); err != nil {
+		return
+	}
+	for _, m := range spec.Mounts {
+		if strings.HasPrefix(m.Destination, "/etc") {
+			mounts = append(mounts, m)
+		}
+	}
+	return
 }

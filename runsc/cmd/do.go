@@ -78,6 +78,8 @@ func (c *Do) SetFlags(f *flag.FlagSet) {
 	f.BoolVar(&c.quiet, "quiet", false, "suppress runsc messages to stdout. Application output is still sent to stdout and stderr")
 }
 
+var cid = fmt.Sprintf("runsc-%06d", rand.Int31n(1000000))
+
 // Execute implements subcommands.Command.Execute.
 func (c *Do) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
 	if len(f.Args()) == 0 {
@@ -127,7 +129,6 @@ func (c *Do) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}) su
 
 	specutils.LogSpec(spec)
 
-	cid := fmt.Sprintf("runsc-%06d", rand.Int31n(1000000))
 	if conf.Network == config.NetworkNone {
 		addNamespace(spec, specs.LinuxNamespace{Type: specs.NetworkNamespace})
 

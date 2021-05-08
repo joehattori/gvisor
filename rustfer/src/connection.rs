@@ -14,19 +14,24 @@ pub struct ConnState {
 }
 
 impl ConnState {
-    pub fn new(server: Server) -> ConnState {
-        ConnState {
-            server,
+    pub fn new(server: Server) -> Self {
+        Self {
             fids: Arc::new(Mutex::new(HashMap::new())),
+            server,
         }
     }
 
-    pub fn insert_conn_state(fd: i32, cs: ConnState) {
+    pub fn insert_conn_state(fd: i32, cs: Self) {
         CONNECTIONS.lock().unwrap().insert(fd, cs);
     }
 
-    pub fn get_conn_state(fd: i32) -> ConnState {
+    pub fn get_conn_state(fd: i32) -> Self {
         let cs = CONNECTIONS.lock().unwrap();
+        // JOETODO: debug code
+        match cs.get(&fd) {
+            None => println!("get_conn_state: No ConnState correspodint to fd: {}", fd),
+            _ => (),
+        };
         cs.get(&fd)
             .expect(&format!("No ConnState corresponding to fd: {}", fd))
             .clone()
@@ -60,7 +65,6 @@ impl ConnState {
     }
 }
 
-// NEXT: think about Server!
 pub struct Server {
     pub attacher: Box<dyn Attacher>,
     pub path_tree: PathNode,
@@ -68,7 +72,7 @@ pub struct Server {
 
 impl Server {
     pub fn new(attacher: Box<dyn Attacher>) -> Self {
-        Server {
+        Self {
             attacher,
             path_tree: PathNode::new(),
         }
@@ -77,7 +81,7 @@ impl Server {
 
 impl Clone for Server {
     fn clone(&self) -> Self {
-        Server {
+        Self {
             attacher: dyn_clone::clone_box(&*self.attacher),
             path_tree: self.path_tree.clone(),
         }

@@ -1,11 +1,11 @@
 use std::ffi::CStr;
 use std::fs::File;
-use std::os::raw::{c_char, c_int, c_void};
+use std::os::raw::{c_char, c_void};
 
 use crate::connection::{ConnState, Server};
 use crate::filter::{install, install_uds_filters};
 use crate::message::{
-    handle, Tattach, Tauth, Tclunk, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate,
+    Request, Tattach, Tauth, Tclunk, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate,
 };
 use crate::rustfer::{
     is_read_only_mount, resolve_mounts, write_mounts, AttachPoint, AttachPointConfig, Config,
@@ -65,7 +65,7 @@ fn rustfer_init(
     let config = unsafe { CStr::from_ptr(config) }.to_str().unwrap();
     let mut config: Config = serde_json::from_str(&config).unwrap();
     let spec_file = File::open("/config/config.json").expect("no such file named \"spec file\"");
-    let mut spec = read_spec_from_file(/*&bundle_dir, */spec_file, &mut config)
+    let mut spec = read_spec_from_file(/*&bundle_dir, */ spec_file, &mut config)
         .unwrap_or_else(|e| panic!("reading spec {}", e));
     if set_up_root {
         // TODO: setup_root_fs(spec, config).unwrap_or_else(|e| panic!("Error setting up root FS: {}", e));
@@ -140,7 +140,7 @@ fn rustfer_init(
                     );
                 }
                 println!(
-                    "serving {} mapped on FD {} (ro: {})",
+                    "Serving {} mapped on FD {} (ro: {})",
                     dst, io_fds[mount_idx as usize], ro_mount
                 );
                 mount_idx += 1;
@@ -173,48 +173,40 @@ fn configure_server(ats: Vec<AttachPoint>, io_fds: Vec<i8>) {
 
 #[no_mangle]
 fn rustfer_tlopen(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    let tlopen = Tlopen::from_ptr(msg);
-    handle(io_fd, *tlopen)
+    Tlopen::from_ptr(msg).handle(io_fd)
 }
 
 #[no_mangle]
 fn rustfer_tclunk(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    let tclunk = Tclunk::from_ptr(msg);
-    handle(io_fd, *tclunk)
+    Tclunk::from_ptr(msg).handle(io_fd)
 }
 
 #[no_mangle]
 fn rustfer_tsetattrclunk(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    let tsetattrclunk = Tsetattrclunk::from_ptr(msg);
-    handle(io_fd, *tsetattrclunk)
+    Tsetattrclunk::from_ptr(msg).handle(io_fd)
 }
 
 #[no_mangle]
 fn rustfer_tremove(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    let tremove = Tremove::from_ptr(msg);
-    handle(io_fd, *tremove)
+    Tremove::from_ptr(msg).handle(io_fd)
 }
 
 #[no_mangle]
 fn rustfer_tattach(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    let tattach = Tattach::from_ptr(msg);
-    handle(io_fd, *tattach)
+    Tattach::from_ptr(msg).handle(io_fd)
 }
 
 #[no_mangle]
 fn rustfer_tucreate(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    let tucreate = Tucreate::from_ptr(msg);
-    handle(io_fd, *tucreate)
+    Tucreate::from_ptr(msg).handle(io_fd)
 }
 
 #[no_mangle]
 fn rustfer_tlcreate(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    let tlcreate = Tlcreate::from_ptr(msg);
-    handle(io_fd, *tlcreate)
+    Tlcreate::from_ptr(msg).handle(io_fd)
 }
 
 #[no_mangle]
 fn rustfer_tauth(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    let tauth = Tauth::from_ptr(msg);
-    handle(io_fd, *tauth)
+    Tauth::from_ptr(msg).handle(io_fd)
 }
