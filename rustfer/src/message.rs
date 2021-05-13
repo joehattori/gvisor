@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::connection::ConnState;
 use crate::fs::{Attr, AttrMask, FIDRef, File, FileMode, OpenFlags, SetAttr, SetAttrMask, FID};
 use crate::unix;
+use crate::wasm_mem::embed_response_to_string;
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QIDType(pub u8);
 
 impl QIDType {
@@ -51,7 +52,7 @@ const NO_FID: u64 = u32::MAX as u64;
 pub const NO_UID: u32 = u32::MAX;
 // pub const NO_GID: u32 = u32::MAX;
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QID {
     pub typ: QIDType,
     pub version: u32,
@@ -59,6 +60,7 @@ pub struct QID {
 }
 
 pub trait Request {
+    // JOETODO: hold response type as trait type. e.g. Twalk <-> Rwalk
     fn handle(&mut self, io_fd: i32) -> *const u8;
 }
 
@@ -79,35 +81,33 @@ impl Request for Tlopen {
         let cs = ConnState::get_conn_state(io_fd);
         let mut fid_ref = match cs.lookup_fid(&self.fid) {
             Some(r) => r,
-            None => return Rlerror::new(unix::EBADF).to_json_ptr(),
+            None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
         };
         // TODO: mutex
-        if fid_ref.is_deleted.load(Ordering::Relaxed)
-            || fid_ref.is_opened
-            || !fid_ref.mode.can_open()
+        if fid_ref.is_deleted.load(Ordering::Relaxed) || fid_ref.is_open || !fid_ref.mode.can_open()
         {
             fid_ref.dec_ref();
-            return Rlerror::new(unix::EINVAL).to_json_ptr();
+            return embed_response_to_string(Rlerror::new(unix::EINVAL));
         }
         // TODO: mutex
         if fid_ref.mode.is_dir() {
             if !self.flags.is_read_only() || self.flags.truncated_flag() != 0 {
                 fid_ref.dec_ref();
-                return Rlerror::new(unix::EISDIR).to_json_ptr();
+                return embed_response_to_string(Rlerror::new(unix::EISDIR));
             }
         }
         match fid_ref.file.open(self.flags) {
             Ok((os_file, qid, io_unit)) => {
-                fid_ref.is_opened = true;
+                fid_ref.is_open = true;
                 fid_ref.open_flags = self.flags;
                 let rlopen = Rlopen::new(qid, io_unit);
                 // rlopen.set_file_payload(os_file);
                 fid_ref.dec_ref();
-                rlopen.to_json_ptr()
+                embed_response_to_string(rlopen)
             }
             Err(err) => {
                 fid_ref.dec_ref();
-                Rlerror::from_err(err).to_json_ptr()
+                embed_response_to_string(Rlerror::from_err(err))
             }
         }
     }
@@ -130,7 +130,7 @@ impl Tauth {
 impl Request for Tauth {
     // We don't support authentication, so this just returns ENOSYS.
     fn handle(&mut self, _: i32) -> *const u8 {
-        Rlerror::new(unix::ENOSYS).to_json_ptr()
+        embed_response_to_string(Rlerror::new(unix::ENOSYS))
     }
 }
 
@@ -149,9 +149,9 @@ impl Request for Tclunk {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
         let cs = ConnState::get_conn_state(io_fd);
         if !cs.delete_fid(&self.fid) {
-            Rlerror::new(unix::EBADF).to_json_ptr()
+            embed_response_to_string(Rlerror::new(unix::EBADF))
         } else {
-            Rclunk {}.to_json_ptr()
+            embed_response_to_string(Rclunk {})
         }
     }
 }
@@ -173,7 +173,7 @@ impl Request for Tsetattrclunk {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
         let cs = ConnState::get_conn_state(io_fd);
         match cs.lookup_fid(&self.fid) {
-            None => Rlerror::new(unix::EBADF).to_json_ptr(),
+            None => embed_response_to_string(Rlerror::new(unix::EBADF)),
             Some(mut rf) => {
                 // TODO: safetyWrite
                 let set_attr_res = if rf.is_deleted() {
@@ -185,11 +185,11 @@ impl Request for Tsetattrclunk {
                 };
                 rf.dec_ref();
                 if !cs.delete_fid(&self.fid) {
-                    Rlerror::new(unix::EBADF).to_json_ptr()
+                    embed_response_to_string(Rlerror::new(unix::EBADF))
                 } else {
                     match set_attr_res {
-                        Ok(_) => Rsetattrclunk {}.to_json_ptr(),
-                        Err(err) => err.to_json_ptr(),
+                        Ok(_) => embed_response_to_string(Rsetattrclunk {}),
+                        Err(err) => embed_response_to_string(err),
                     }
                 }
             }
@@ -212,7 +212,7 @@ impl Request for Tremove {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
         let cs = ConnState::get_conn_state(io_fd);
         match cs.lookup_fid(&self.fid) {
-            None => Rlerror::new(unix::EBADF).to_json_ptr(),
+            None => embed_response_to_string(Rlerror::new(unix::EBADF)),
             Some(rf) => {
                 // TODO: safelyGlobal
                 let res = if rf.is_root() || rf.is_deleted() {
@@ -230,11 +230,11 @@ impl Request for Tremove {
                     }
                 };
                 if !cs.delete_fid(&self.fid) {
-                    Rlerror::new(unix::EBADF).to_json_ptr()
+                    embed_response_to_string(Rlerror::new(unix::EBADF))
                 } else {
                     match res {
-                        Ok(_) => Rremove {}.to_json_ptr(),
-                        Err(err) => err.to_json_ptr(),
+                        Ok(_) => embed_response_to_string(Rremove {}),
+                        Err(err) => embed_response_to_string(err),
                     }
                 }
             }
@@ -257,36 +257,31 @@ impl Tattach {
 impl Request for Tattach {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
         let cs = ConnState::get_conn_state(io_fd);
-        println!("Tattach 1");
         if self.auth.authentication_fid != NO_FID {
-            return Rlerror::new(unix::EINVAL).to_json_ptr();
+            return embed_response_to_string(Rlerror::new(unix::EINVAL));
         }
-        println!("Tattach 2");
-        if Path::new(&self.auth.attach_name).is_absolute() {
+        // if Path::new(&self.auth.attach_name).is_absolute() {
+        if self.auth.attach_name.chars().next().unwrap() == '/' {
             self.auth.attach_name = self.auth.attach_name[1..].to_string();
         }
-        println!("Tattach 3");
         let mut file = match cs.server.attacher.attach() {
             Ok(f) => f,
-            Err(err) => return Rlerror::from_err(err).to_json_ptr(),
+            Err(err) => return embed_response_to_string(Rlerror::from_err(err)),
         };
-        println!("Tattach 4");
         let (qid, valid, attr) = match file.get_attr(AttrMask::mask_all()) {
             Ok(v) => v,
             Err(errno) => {
                 // file.close();
-                return Rlerror::from_err(errno).to_json_ptr();
+                return embed_response_to_string(Rlerror::from_err(errno));
             }
         };
-        println!("Tattach 5");
         if !valid.file_mode {
             file.close();
-            return Rlerror::new(unix::EINVAL).to_json_ptr();
+            return embed_response_to_string(Rlerror::new(unix::EINVAL));
         }
-        println!("Tattach 6");
         let mut root = FIDRef {
             is_deleted: AtomicBool::new(false),
-            is_opened: false,
+            is_open: false,
             open_flags: OpenFlags(0),
             file,
             parent: None,
@@ -295,29 +290,30 @@ impl Request for Tattach {
             mode: attr.file_mode.file_type(),
             path_node: cs.server.path_tree.clone(),
         };
-        println!("Tattach 7");
         if self.auth.attach_name.is_empty() {
             cs.insert_fid(&self.fid, &mut root);
-            println!("Tattach 8");
             root.dec_ref();
         } else {
-            let (_, mut new_ref, _, _) =
-                match do_walk(&cs, root.clone(), &Path::new(&self.auth.attach_name), false) {
-                    Ok(v) => v,
-                    Err(err) => return Rlerror::from_err(err).to_json_ptr(),
-                };
+            let names: Vec<String> = self
+                .auth
+                .attach_name
+                .split('/')
+                .map(|s| s.to_string())
+                .collect();
+            let (_, mut new_ref, _, _) = match do_walk(&cs, &mut root, names, false) {
+                Ok(v) => v,
+                Err(err) => return embed_response_to_string(Rlerror::from_err(err)),
+            };
             cs.insert_fid(&self.fid, &mut new_ref);
             new_ref.dec_ref();
             root.dec_ref();
-            println!("Tattach 9");
-        }
-        println!("Tattach 10");
-        Rattach::from_qid(qid).to_json_ptr()
+        };
+        embed_response_to_string(Rattach::from_qid(qid))
     }
 }
 
 fn check_safe_name(name: &str) -> io::Result<()> {
-    if name.is_empty() && name.contains("/") && name != "." && name != ".." {
+    if !name.is_empty() && !name.contains("/") && name != "." && name != ".." {
         Ok(())
     } else {
         Err(Error::new(
@@ -329,27 +325,27 @@ fn check_safe_name(name: &str) -> io::Result<()> {
 
 fn do_walk(
     cs: &ConnState,
-    rf: FIDRef,
-    path: &Path,
+    rf: &mut FIDRef,
+    names: Vec<String>,
     getattr: bool,
-) -> io::Result<(Vec<QID>, FIDRef, AttrMask, Attr)> {
+) -> io::Result<(Vec<QID>, Box<FIDRef>, AttrMask, Attr)> {
     let mut qids = Vec::new();
     let mut valid = AttrMask::default();
     let mut attr = Attr::default();
-    for name in path.iter() {
-        check_safe_name(name.to_str().unwrap())?
+    for name in &names {
+        check_safe_name(name)?
     }
     // TODO: safelyRead()
-    if rf.is_opened {
+    if rf.is_open {
         return Err(Error::new(ErrorKind::Other, "source busy."));
     }
-    if path.iter().collect::<Vec<_>>().len() == 0 {
+    if names.len() == 0 {
         // TODO: safelyRead()
         let (_, sf, valid_, attr_) = walk_one(vec![], rf.clone().file, vec![], getattr)?;
         valid = valid_;
         attr = attr_;
         let mut fid_ref = FIDRef {
-            is_opened: false,
+            is_open: false,
             open_flags: OpenFlags(0),
             refs: AtomicI64::new(0),
             server: cs.server.clone(),
@@ -364,41 +360,42 @@ fn do_walk(
                 let name = &rf.clone().parent.unwrap().path_node.name_for(&rf);
                 rf.add_child_to_parent(&fid_ref, name);
             }
-            rf.parent.unwrap().inc_ref();
+            if let Some(ref mut parent) = rf.parent {
+                parent.inc_ref();
+            }
         }
         fid_ref.inc_ref();
-        return Ok((vec![], fid_ref, valid, attr));
+        return Ok((vec![], Box::new(fid_ref), valid, attr));
     }
-    let mut walk_ref = rf;
+    let mut walk_ref = Box::new(rf.clone());
     walk_ref.inc_ref();
-    for name in path.iter() {
+    for name in names {
         if !walk_ref.mode.is_dir() {
             walk_ref.dec_ref();
             return Err(Error::new(ErrorKind::InvalidData, "unix::EINVAL"));
         }
         // TODO: safelyRead
-        let name = name.to_str().unwrap();
-        let (qids_, sf, valid_, attr_) = walk_one(qids, walk_ref.clone().file, vec![name], true)
+        let (qids_, sf, valid_, attr_) = walk_one(qids, walk_ref.clone().file, vec![&name], true)
             .map_err(|e| {
-                walk_ref.dec_ref();
-                e
-            })?;
+            walk_ref.dec_ref();
+            e
+        })?;
         qids = qids_;
         valid = valid_;
         attr = attr_;
         let new_ref = FIDRef {
             is_deleted: AtomicBool::new(false),
-            is_opened: false,
+            is_open: false,
             open_flags: OpenFlags(0),
             refs: AtomicI64::new(0),
             server: cs.server.clone(),
-            parent: Some(Box::new(walk_ref.clone())),
+            parent: Some(walk_ref.clone()),
             file: sf,
             mode: attr.file_mode.clone(),
-            path_node: walk_ref.path_node.path_node_for(name),
+            path_node: walk_ref.path_node.path_node_for(&name),
         };
-        walk_ref.path_node.add_child(&new_ref, name);
-        walk_ref = new_ref;
+        walk_ref.path_node.add_child(&new_ref, &name);
+        walk_ref = Box::new(new_ref);
         walk_ref.inc_ref();
     }
     Ok((qids, walk_ref, valid, attr))
@@ -406,11 +403,12 @@ fn do_walk(
 
 fn walk_one(
     mut qids: Vec<QID>,
-    from: Box<dyn File>,
+    mut from: Box<dyn File>,
     names: Vec<&str>,
     getattr: bool,
 ) -> io::Result<(Vec<QID>, Box<dyn File>, AttrMask, Attr)> {
     if names.len() > 1 {
+        println!("walk_one 0");
         return Err(Error::new(ErrorKind::InvalidData, "unix::EINVAL"));
     }
     let mut local_qids = Vec::new();
@@ -425,7 +423,10 @@ fn walk_one(
                 attr = v.3;
                 v.1
             }
-            Err(e) => return Err(Error::new(ErrorKind::InvalidData, format!("{}", e))),
+            Err(e) => {
+                println!("walk_one 1 {}", e);
+                return Err(Error::new(ErrorKind::InvalidData, format!("{}", e)));
+            }
         }
     } else {
         let res = from.walk(names)?;
@@ -439,6 +440,7 @@ fn walk_one(
                 }
                 Err(e) => {
                     sf.close();
+                    println!("walk_one 2");
                     return Err(Error::new(ErrorKind::Other, format!("{}", e)));
                 }
             }
@@ -447,6 +449,7 @@ fn walk_one(
     };
     if local_qids.len() != 1 {
         sf.close();
+        println!("walk_one 3");
         Err(Error::new(ErrorKind::InvalidData, "unix::EINVAL"))
     } else {
         qids.append(&mut local_qids);
@@ -471,9 +474,9 @@ impl Request for Tucreate {
         let cs = ConnState::get_conn_state(io_fd);
         let rlcreate = match self.tlcreate.perform(&cs, NO_UID) {
             Ok(rlcreate) => rlcreate,
-            Err(errno) => return Rlerror::new(errno).to_json_ptr(),
+            Err(errno) => return embed_response_to_string(Rlerror::new(errno)),
         };
-        Rucreate { rlcreate }.to_json_ptr()
+        embed_response_to_string(Rucreate { rlcreate })
     }
 }
 
@@ -499,7 +502,7 @@ impl Tlcreate {
             None => return Err(unix::EBADF),
         };
         // TODO: safelyWrite
-        if rf.is_deleted() || !rf.mode.is_dir() || rf.is_opened {
+        if rf.is_deleted() || !rf.mode.is_dir() || rf.is_open {
             rf.dec_ref();
             Err(unix::EINVAL)
         } else {
@@ -513,7 +516,7 @@ impl Tlcreate {
                         server: cs.server.clone(),
                         parent: Some(Box::new(rf.clone())),
                         file: nsf,
-                        is_opened: true,
+                        is_open: true,
                         open_flags: self.open_flags,
                         mode: FileMode::regular(),
                         path_node,
@@ -544,17 +547,87 @@ impl Request for Tlcreate {
         let cs = ConnState::get_conn_state(io_fd);
         let rlcreate = match self.perform(&cs, NO_UID) {
             Ok(rlcreate) => rlcreate,
-            Err(errno) => return Rlerror::new(errno).to_json_ptr(),
+            Err(errno) => return embed_response_to_string(Rlerror::new(errno)),
         };
-        rlcreate.to_json_ptr()
+        embed_response_to_string(rlcreate)
     }
 }
 
-pub trait Response: serde_traitobject::Serialize + serde_traitobject::Deserialize {
-    fn to_json_ptr(&self) -> *const u8;
+#[derive(Serialize, Deserialize)]
+pub struct Twalk {
+    fid: FID,
+    new_fid: FID,
+    names: Option<Vec<String>>,
+}
+impl Twalk {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
 }
 
-// NEXT: here! do we need StdFile in Rlopen? maybe unneeded in a demo projec?
+impl Request for Twalk {
+    fn handle(&mut self, io_fd: i32) -> *const u8 {
+        let cs = ConnState::get_conn_state(io_fd);
+        let mut fid_ref = match cs.lookup_fid(&self.fid) {
+            Some(r) => r,
+            None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
+        };
+        let names = self.names.clone().unwrap_or(vec![]);
+        match do_walk(&cs, &mut fid_ref, names, false) {
+            Ok((qids, mut new_ref, _, _)) => {
+                cs.insert_fid(&self.new_fid, &mut new_ref);
+                fid_ref.dec_ref();
+                new_ref.dec_ref();
+                embed_response_to_string(Rwalk { qids })
+            }
+            Err(err) => {
+                fid_ref.dec_ref();
+                embed_response_to_string(Rlerror::from_err(err))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Twalkgetattr {
+    fid: FID,
+    new_fid: FID,
+    names: Vec<String>,
+}
+impl Twalkgetattr {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(&msg).unwrap()
+    }
+}
+
+impl Request for Twalkgetattr {
+    fn handle(&mut self, io_fd: i32) -> *const u8 {
+        let cs = ConnState::get_conn_state(io_fd);
+        let mut fid_ref = match cs.lookup_fid(&self.fid) {
+            Some(r) => r,
+            None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
+        };
+        match do_walk(&cs, &mut fid_ref, self.names.clone(), true) {
+            Ok((qids, mut new_ref, valid, attr)) => {
+                cs.insert_fid(&self.new_fid, &mut new_ref);
+                fid_ref.dec_ref();
+                new_ref.dec_ref();
+                embed_response_to_string(Rwalkgetattr { qids, valid, attr })
+            }
+            Err(err) => {
+                println!("Twalkgetattr failed");
+                fid_ref.dec_ref();
+                embed_response_to_string(Rlerror::from_err(err))
+            }
+        }
+    }
+}
+
+pub trait Response: serde_traitobject::Serialize + serde_traitobject::Deserialize {}
+
+// NEXT: here! do we need OsFile in Rlopen? maybe unneeded in a demo projec?
 #[derive(Serialize, Deserialize)]
 pub struct Rlopen {
     qid: QID,
@@ -566,53 +639,24 @@ impl Rlopen {
         Rlopen { qid, io_unit }
     }
 
-    //  pub fn set_file_payload(&mut self, fd: Option<StdFile>) {
+    //  pub fn set_file_payload(&mut self, fd: Option<OsFile>) {
     //      self.file = fd;
     //  }
-    fn to_json_ptr(&self) -> *const u8 {
-        serde_json::to_string(self)
-            .expect("failed to convert to json.")
-            .as_ptr()
-    }
 }
 
-impl Response for Rlopen {
-    fn to_json_ptr(&self) -> *const u8 {
-        serde_json::to_string(self)
-            .expect("failed to convert to json.")
-            .as_ptr()
-    }
-}
+impl Response for Rlopen {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rclunk {}
-impl Response for Rclunk {
-    fn to_json_ptr(&self) -> *const u8 {
-        serde_json::to_string(self)
-            .expect("failed to convert to json.")
-            .as_ptr()
-    }
-}
+impl Response for Rclunk {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rsetattrclunk {}
-impl Response for Rsetattrclunk {
-    fn to_json_ptr(&self) -> *const u8 {
-        serde_json::to_string(self)
-            .expect("failed to convert to json.")
-            .as_ptr()
-    }
-}
+impl Response for Rsetattrclunk {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rremove {}
-impl Response for Rremove {
-    fn to_json_ptr(&self) -> *const u8 {
-        serde_json::to_string(self)
-            .expect("failed to convert to json.")
-            .as_ptr()
-    }
-}
+impl Response for Rremove {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rattach {
@@ -630,13 +674,7 @@ impl Rattach {
         }
     }
 }
-impl Response for Rattach {
-    fn to_json_ptr(&self) -> *const u8 {
-        serde_json::to_string(self)
-            .expect("failed to convert to json.")
-            .as_ptr()
-    }
-}
+impl Response for Rattach {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rlcreate {
@@ -646,24 +684,14 @@ impl Rlcreate {
     //fn set_file_payload(&mut self, fd: Option<Fd>) {
     //    self.rlopen.set_file_payload(fd)
     //}
-    fn to_json_ptr(&self) -> *const u8 {
-        serde_json::to_string(self)
-            .expect("failed to convert to json.")
-            .as_ptr()
-    }
 }
+impl Response for Rlcreate {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rucreate {
     rlcreate: Rlcreate,
 }
-impl Response for Rucreate {
-    fn to_json_ptr(&self) -> *const u8 {
-        serde_json::to_string(self)
-            .expect("failed to convert to json.")
-            .as_ptr()
-    }
-}
+impl Response for Rucreate {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Rlerror {
@@ -682,18 +710,22 @@ impl Rlerror {
     }
 }
 
-impl Response for Rlerror {
-    fn to_json_ptr(&self) -> *const u8 {
-        serde_json::to_string(self)
-            .expect("failed to convert to json.")
-            .as_ptr()
-    }
+impl Response for Rlerror {}
+
+#[derive(Serialize, Deserialize)]
+pub struct Rwalk {
+    qids: Vec<QID>,
 }
+impl Response for Rwalk {}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Rwalkgetattr {
+    valid: AttrMask,
+    attr: Attr,
+    qids: Vec<QID>,
+}
+impl Response for Rwalkgetattr {}
 
 fn extract_errno(err: Error) -> i32 {
     err.raw_os_error().unwrap_or(unix::EIO)
-}
-
-fn errno_to_serde_traitobject(errno: i32) -> serde_traitobject::Box<dyn serde_traitobject::Any> {
-    serde_traitobject::Box::new(Rlerror::new(errno))
 }

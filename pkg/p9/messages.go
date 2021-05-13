@@ -194,13 +194,13 @@ func (r *Rflush) String() string {
 // Twalk is a walk request.
 type Twalk struct {
 	// FID is the FID to be walked.
-	FID FID
+	FID FID `json:"fid"`
 
 	// NewFID is the resulting FID.
-	NewFID FID
+	NewFID FID `json:"new_fid"`
 
 	// Names are the set of names to be walked.
-	Names []string
+	Names []string `json:"names"`
 }
 
 // decode implements encoder.decode.
@@ -2173,13 +2173,13 @@ func (*Rflushf) String() string {
 // Twalkgetattr is a walk request.
 type Twalkgetattr struct {
 	// FID is the FID to be walked.
-	FID FID
+	FID FID `json:"fid"`
 
 	// NewFID is the resulting FID.
-	NewFID FID
+	NewFID FID `json:"new_fid"`
 
 	// Names are the set of names to be walked.
-	Names []string
+	Names []string `json:"names"`
 }
 
 // decode implements encoder.decode.
@@ -2216,13 +2216,13 @@ func (t *Twalkgetattr) String() string {
 // Rwalkgetattr is a walk response.
 type Rwalkgetattr struct {
 	// Valid indicates which fields are valid in the Attr below.
-	Valid AttrMask
+	Valid AttrMask `json:"valid"`
 
 	// Attr is the set of attributes for the last QID (the file walked to).
-	Attr Attr
+	Attr Attr `json:"attr"`
 
 	// QIDs are the set of QIDs returned.
-	QIDs []QID
+	QIDs []QID `json:"qids"`
 }
 
 // decode implements encoder.decode.

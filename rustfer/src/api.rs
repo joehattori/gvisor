@@ -5,27 +5,27 @@ use std::os::raw::{c_char, c_void};
 use crate::connection::{ConnState, Server};
 use crate::filter::{install, install_uds_filters};
 use crate::message::{
-    Request, Tattach, Tauth, Tclunk, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate,
+    Request, Tattach, Tauth, Tclunk, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate, Twalk,
+    Twalkgetattr,
 };
 use crate::rustfer::{
     is_read_only_mount, resolve_mounts, write_mounts, AttachPoint, AttachPointConfig, Config,
     Rustfer,
 };
 use crate::spec_utils::{is_external_mount, read_spec_from_file};
+use crate::wasm_mem::alloc;
 
 #[no_mangle]
-fn rustfer_allocate(size: usize) -> *mut c_void {
-    let mut buffer = Vec::with_capacity(size);
-    let pointer = buffer.as_mut_ptr();
-    std::mem::forget(buffer);
-
-    pointer as *mut c_void
+fn rustfer_allocate(size: i32) -> *mut c_void {
+    alloc(size as usize)
 }
 
 #[no_mangle]
-fn rustfer_deallocate(pointer: *mut c_void, capacity: usize) {
+fn rustfer_deallocate(ptr: *mut c_void, size: i32) {
+    let size = size as usize;
     unsafe {
-        let _ = Vec::from_raw_parts(pointer, 0, capacity);
+        let data = Vec::from_raw_parts(ptr, size, size);
+        std::mem::drop(data);
     }
 }
 
@@ -209,4 +209,14 @@ fn rustfer_tlcreate(io_fd: i32, msg: *mut c_char) -> *const u8 {
 #[no_mangle]
 fn rustfer_tauth(io_fd: i32, msg: *mut c_char) -> *const u8 {
     Tauth::from_ptr(msg).handle(io_fd)
+}
+
+#[no_mangle]
+fn rustfer_twalk(io_fd: i32, msg: *mut c_char) -> *const u8 {
+    Twalk::from_ptr(msg).handle(io_fd)
+}
+
+#[no_mangle]
+fn rustfer_twalkgetattr(io_fd: i32, msg: *mut c_char) -> *const u8 {
+    Twalkgetattr::from_ptr(msg).handle(io_fd)
 }

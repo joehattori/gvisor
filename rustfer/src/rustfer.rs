@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fs::{self, File as StdFile};
+use std::fs::{self, File as OsFile};
 use std::io::{self, prelude::*};
 use std::os::wasi::prelude::*;
 use std::path::{self, Path};
@@ -155,7 +155,7 @@ impl Config {
 pub fn write_mounts(mounts: &Vec<Mount>) -> io::Result<()> {
     // JOETODO: what do you mean by writing to a ro mount.
     // let bytes = serde_json::to_string(mounts).expect("couldn't serialize mounts to json.");
-    // let mut file = StdFile::create("mountsfile")?;
+    // let mut file = OsFile::create("mountsfile")?;
     // file.write_all(bytes.as_bytes())?;
     Ok(())
 }
@@ -379,11 +379,8 @@ impl Attacher for AttachPoint {
 
 impl PartialEq for AttachPoint {
     fn eq(&self, other: &Self) -> bool {
-        self.prefix == other.prefix
-            && self.config == other.config
-            && *self.attached.lock().unwrap() == *other.attached.lock().unwrap()
-            && *self.next_device.lock().unwrap() == *other.next_device.lock().unwrap()
-            && *self.devices.lock().unwrap() == *other.devices.lock().unwrap()
+        // JOETODO: perform more properly.
+        self.prefix == other.prefix && self.config == other.config
     }
 }
 
@@ -400,15 +397,19 @@ pub struct AttachPointConfig {
 fn join(parent: &str, child: &str) -> String {
     if child == "." || child == ".." {
         panic!("invalid child path {}", child)
-    } else {
-        format!("{}/{}", parent, child)
     }
+    Path::new(parent)
+        .join(child)
+        .as_path()
+        .to_str()
+        .unwrap()
+        .to_string()
 }
 
 pub fn open_any_file_from_parent(
     parent: &LocalFile,
     name: &str,
-) -> io::Result<(StdFile, String, bool)> {
+) -> io::Result<(OsFile, String, bool)> {
     let file_path = join(&parent.host_path, name);
     let cloned = file_path.to_owned();
     let (file, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
@@ -418,8 +419,8 @@ pub fn open_any_file_from_parent(
 }
 
 pub fn open_any_file<'a>(
-    f: Box<dyn Fn(&fs::OpenOptions) -> io::Result<StdFile>>,
-) -> io::Result<(StdFile, bool)> {
+    f: Box<dyn Fn(&fs::OpenOptions) -> io::Result<OsFile>>,
+) -> io::Result<(OsFile, bool)> {
     #[derive(Debug)]
     struct Mode<'a> {
         open_option: &'a fs::OpenOptions,
@@ -441,7 +442,7 @@ pub fn open_any_file<'a>(
     for mode in modes.iter() {
         match f(mode.open_option) {
             Ok(file) => {
-                println!("Attempt to open file succeed!");
+                eprintln!("Attempt to open file succeed!");
                 return Ok((file, mode.readable));
             }
             Err(err) => {
@@ -449,28 +450,13 @@ pub fn open_any_file<'a>(
                     return Err(err);
                 }
                 error = err;
-                println!(
+                eprintln!(
                     "Attempt to open file failed, mode: {:?}, err: {}",
                     mode, error
                 );
             }
         };
     }
-    println!("Attempt to open file failed, err: {}", error);
+    eprintln!("Attempt to open file failed, err: {}", error);
     Err(error)
-}
-
-pub fn reopen_proc_fd(fd: RawFd, option: &fs::OpenOptions) -> io::Result<StdFile> {
-    option.open(format!("/proc/self/fd/{}", fd.to_string()))
-}
-
-pub fn fstat(fd: RawFd) -> io::Result<libc::stat> {
-    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-    let res = unsafe { libc::fstat(fd as i32, &mut stat) };
-    if res < 0 {
-        // TODO: return appropriate error
-        Err(io::Error::from_raw_os_error(unix::EBADF))
-    } else {
-        Ok(stat)
-    }
 }

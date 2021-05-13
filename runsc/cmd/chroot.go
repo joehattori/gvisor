@@ -122,8 +122,10 @@ func setUpChroot(pidns bool) error {
 		return fmt.Errorf("error mouting config in chroot: %v", err)
 	}
 
-	if err := os.Mkdir(filepath.Join(chroot, "/etc"), 0700); err != nil {
-		return fmt.Errorf("error creating /etc in chroot: %v", err)
+	for _, dir := range []string{"/etc", "/dev", "/sys", "/tmp"} {
+		if err := os.Mkdir(filepath.Join(chroot, dir), 0700); err != nil {
+			return fmt.Errorf("error creating %v in chroot: %v", dir, err)
+		}
 	}
 
 	if err := ioutil.WriteFile(filepath.Join(chroot, "/etc/resolv.conf"), []byte("nameserver 8.8.8.8\n"), 0666); err != nil {

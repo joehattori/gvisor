@@ -25,10 +25,15 @@ import (
 	"gvisor.dev/gvisor/pkg/log"
 )
 
+var (
+	attachbefore, attachafter, attachcount int64
+)
+
 // Attach attaches to a server.
 //
 // Note that authentication is not currently supported.
 func (c *Client) Attach(name string) (File, error) {
+	start := time.Now()
 	fid, ok := c.fidPool.Get()
 	if !ok {
 		return nil, ErrOutOfFIDs
@@ -36,13 +41,24 @@ func (c *Client) Attach(name string) (File, error) {
 
 	rattach := Rattach{}
 	log.Infof("\njoehattori: before sendRecv() on Attach %v\n", time.Now())
+
+	attachcount++
 	if err := c.sendRecv(&Tattach{FID: FID(fid), Auth: Tauth{AttachName: name, AuthenticationFID: NoFID, UID: NoUID}}, &rattach); err != nil {
 		c.fidPool.Put(fid)
 		return nil, err
 	}
+	if attachcount > 1 {
+		attachbefore += time.Since(start).Microseconds()
+		log.Debugf("joeattach before %v %v", attachbefore/attachcount, attachcount)
+	}
 
+	start = time.Now()
 	if err := callWasmFunc(c.socket.FD(), &Tattach{FID: FID(fid), Auth: Tauth{AttachName: name, AuthenticationFID: NoFID, UID: NoUID}}, &rattach); err != nil {
 		return nil, err
+	}
+	if attachcount > 1 {
+		attachafter += time.Since(start).Microseconds()
+		log.Debugf("joeattach after  %v %v", attachafter/attachcount, attachcount)
 	}
 
 	return c.newFile(FID(fid)), nil
@@ -89,6 +105,10 @@ func (c *clientFile) Walk(names []string) ([]QID, File, error) {
 		return nil, nil, err
 	}
 
+	if err := callWasmFunc(c.client.socket.FD(), &Twalk{FID: c.fid, NewFID: FID(fid), Names: names}, &rwalk); err != nil {
+		return nil, nil, err
+	}
+
 	// Return a new client file.
 	return rwalk.QIDs, c.client.newFile(FID(fid)), nil
 }
@@ -120,6 +140,9 @@ func (c *clientFile) WalkGetAttr(components []string) ([]QID, File, AttrMask, At
 	rwalkgetattr := Rwalkgetattr{}
 	if err := c.client.sendRecv(&Twalkgetattr{FID: c.fid, NewFID: FID(fid), Names: components}, &rwalkgetattr); err != nil {
 		c.client.fidPool.Put(fid)
+		return nil, nil, AttrMask{}, Attr{}, err
+	}
+	if err := callWasmFunc(c.client.socket.FD(), &Twalkgetattr{FID: c.fid, NewFID: FID(fid), Names: components}, &rwalkgetattr); err != nil {
 		return nil, nil, AttrMask{}, Attr{}, err
 	}
 
@@ -356,6 +379,8 @@ func (c *clientFile) Open(flags OpenFlags) (*fd.FD, QID, uint32, error) {
 	if count > 1 {
 		after += time.Since(start)
 		log.Infof("joecli:after : %v µs", after.Microseconds()/count)
+	} else {
+		log.Debugf("joecli:initial: %v", time.Since(start))
 	}
 	log.Infof("rustferopen atfer: %v", rlopen)
 

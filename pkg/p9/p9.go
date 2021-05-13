@@ -545,20 +545,20 @@ func (f *FSStat) encode(b *buffer) {
 
 // AttrMask is a mask of attributes for getattr.
 type AttrMask struct {
-	Mode        bool
-	NLink       bool
-	UID         bool
-	GID         bool
-	RDev        bool
-	ATime       bool
-	MTime       bool
-	CTime       bool
-	INo         bool
-	Size        bool
-	Blocks      bool
-	BTime       bool
-	Gen         bool
-	DataVersion bool
+	Mode        bool `json:"file_mode"`
+	NLink       bool `json:"n_link"`
+	UID         bool `json:"uid"`
+	GID         bool `json:"gid"`
+	RDev        bool `json:"r_dev"`
+	ATime       bool `json:"a_time"`
+	MTime       bool `json:"m_time"`
+	CTime       bool `json:"c_time"`
+	INo         bool `json:"i_no"`
+	Size        bool `json:"size"`
+	Blocks      bool `json:"blocks"`
+	BTime       bool `json:"b_time"`
+	Gen         bool `json:"gen"`
+	DataVersion bool `json:"data_version"`
 }
 
 // Contains returns true if a contains all of the attributes masked as b.
@@ -750,24 +750,24 @@ func (a *AttrMask) encode(b *buffer) {
 
 // Attr is a set of attributes for getattr.
 type Attr struct {
-	Mode             FileMode
-	UID              UID
-	GID              GID
-	NLink            uint64
-	RDev             uint64
-	Size             uint64
-	BlockSize        uint64
-	Blocks           uint64
-	ATimeSeconds     uint64
-	ATimeNanoSeconds uint64
-	MTimeSeconds     uint64
-	MTimeNanoSeconds uint64
-	CTimeSeconds     uint64
-	CTimeNanoSeconds uint64
-	BTimeSeconds     uint64
-	BTimeNanoSeconds uint64
-	Gen              uint64
-	DataVersion      uint64
+	Mode             FileMode `json:"file_mode"`
+	UID              UID      `json:"uid"`
+	GID              GID      `json:"gid"`
+	NLink            uint64   `json:"n_link"`
+	RDev             uint64   `json:"r_dev"`
+	Size             uint64   `json:"size"`
+	BlockSize        uint64   `json:"block_size"`
+	Blocks           uint64   `json:"blocks"`
+	ATimeSeconds     uint64   `json:"a_time_seconds"`
+	ATimeNanoSeconds uint64   `json:"a_time_nanoseconds"`
+	MTimeSeconds     uint64   `json:"m_time_seconds"`
+	MTimeNanoSeconds uint64   `json:"m_time_nanoseconds"`
+	CTimeSeconds     uint64   `json:"c_time_seconds"`
+	CTimeNanoSeconds uint64   `json:"c_time_nanoseconds"`
+	BTimeSeconds     uint64   `json:"b_time_seconds"`
+	BTimeNanoSeconds uint64   `json:"b_time_nanoseconds"`
+	Gen              uint64   `json:"gen"`
+	DataVersion      uint64   `json:"data_version"`
 }
 
 // String implements fmt.Stringer.

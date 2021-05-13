@@ -339,6 +339,7 @@ func (cs *connState) LookupFID(fid FID) (*fidRef, bool) {
 // This fid starts with a reference count of one. If a FID exists in
 // the slot already it is closed, per the specification.
 func (cs *connState) InsertFID(fid FID, newRef *fidRef) {
+	log.Debugf("joehattori inserting %v", fid)
 	cs.fidMu.Lock()
 	defer cs.fidMu.Unlock()
 	origRef, ok := cs.fids[fid]

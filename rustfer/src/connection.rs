@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 use once_cell::sync::Lazy;
@@ -46,6 +47,7 @@ impl ConnState {
     }
 
     pub fn insert_fid(&self, fid: &FID, new_ref: &mut FIDRef) {
+        println!("inserting fid: {}, mode: {:?}", fid, new_ref.mode);
         new_ref.inc_ref();
         let mut fids = self.fids.lock().unwrap();
         if let Some(mut orig) = fids.insert(*fid, new_ref.clone()) {
@@ -56,7 +58,7 @@ impl ConnState {
     pub fn delete_fid(&self, fid: &FID) -> bool {
         let mut fids = self.fids.lock().unwrap();
         match fids.remove(fid) {
-            Some(mut rf) => {
+            Some(ref mut rf) => {
                 rf.dec_ref();
                 true
             }
@@ -85,5 +87,12 @@ impl Clone for Server {
             attacher: dyn_clone::clone_box(&*self.attacher),
             path_tree: self.path_tree.clone(),
         }
+    }
+}
+
+impl Hash for Server {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // JOETODO: implement Hash for Attacher.
+        self.path_tree.hash(state);
     }
 }

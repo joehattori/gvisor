@@ -1468,13 +1468,7 @@ go_repository(
 )
 
 go_repository(
-    name = "com_github_bytecodealliance_wasmtime_go",
-    importpath = "github.com/bytecodealliance/wasmtime-go",
-    sum = "h1:wHOt9u+irLBCUjotanqDwVbnNmTJ1gWQxY2+q+XeMp4=",
-    version = "v0.26.0",
+    name = "com_github_joehattori_wasmer_go",
+    importpath = "github.com/joehattori/wasmer-go",
+    commit = "40dae0794ef65616366ac58639c54947c376446f",
 )
-
-#local_repository(
-#    name = "local_wasmer_go",
-#    path = "/home/vagrant/wasmer-go",
-#)

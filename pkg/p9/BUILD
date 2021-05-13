@@ -31,7 +31,7 @@ go_library(
         "//pkg/sync",
         "//pkg/unet",
         "@org_golang_x_sys//unix:go_default_library",
-        "@com_github_bytecodealliance_wasmtime_go//:go_default_library",
+        "@com_github_joehattori_wasmer_go//wasmer:wasmer",
     ],
 )
 

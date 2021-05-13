@@ -10,10 +10,13 @@ mod rustfer;
 mod seccomp;
 mod spec_utils;
 mod unix;
+mod wasm_mem;
 
 fn main() {
     read_dir("/");
+    read_dir("/dev");
     read_dir("/etc");
+    read_dir("/proc/self/fd");
 }
 
 fn read_dir(dir: &str) {
@@ -36,9 +39,4 @@ fn read_dir(dir: &str) {
         };
         println!("entry: {:?}", entry.path());
     }
-    // let mut entries = read_dir
-    //     .map(|res| res.map(|e| e.path()))
-    //     .collect::<Result<Vec<_>, io::Error>>().unwrap();
-    // entries.sort();
-    // println!(".\n\t{:?}", entries);
 }

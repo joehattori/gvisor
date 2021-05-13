@@ -221,8 +221,14 @@ func (t *Tauth) handle(cs *connState) message {
 	return newErr(unix.ENOSYS)
 }
 
+var (
+	twalkCount int
+	twalkAcum  int64
+)
+
 // handle implements handler.handle.
 func (t *Tattach) handle(cs *connState) message {
+	start := time.Now()
 	// Ensure no authentication FID is provided.
 	if t.Auth.AuthenticationFID != NoFID {
 		return newErr(unix.EINVAL)
@@ -265,6 +271,10 @@ func (t *Tattach) handle(cs *connState) message {
 	// Attach the root?
 	if len(t.Auth.AttachName) == 0 {
 		cs.InsertFID(t.FID, root)
+		diff := time.Since(start).Microseconds()
+		twalkCount++
+		twalkAcum += diff
+		log.Debugf("joewalkcli %v, %v", twalkAcum/int64(twalkCount), twalkCount)
 		return &Rattach{QID: qid}
 	}
 
@@ -279,6 +289,10 @@ func (t *Tattach) handle(cs *connState) message {
 
 	// Insert the FID.
 	cs.InsertFID(t.FID, newRef)
+	diff := time.Since(start).Microseconds()
+	twalkCount++
+	twalkAcum += diff
+	log.Debugf("joewalkcli %v, %v", twalkAcum/int64(twalkCount), twalkCount)
 	return &Rattach{QID: qid}
 }
 
@@ -291,7 +305,6 @@ func CanOpen(mode FileMode) bool {
 
 // handle implements handler.handle.
 func (t *Tlopen) handle(cs *connState) message {
-	log.Infof("joehattori: Tlopen handle %v\n", time.Now())
 	ref, ok := cs.LookupFID(t.FID)
 	if !ok {
 		return newErr(unix.EBADF)
@@ -342,6 +355,7 @@ func (t *Tlopen) handle(cs *connState) message {
 }
 
 func (t *Tlcreate) do(cs *connState, uid UID) (*Rlcreate, error) {
+	log.Debugf("joehattori Tlcreate: %+v", t)
 	if err := checkSafeName(t.Name); err != nil {
 		return nil, err
 	}
@@ -1285,6 +1299,7 @@ func doWalk(cs *connState, ref *fidRef, names []string, getattr bool) (qids []QI
 
 // handle implements handler.handle.
 func (t *Twalk) handle(cs *connState) message {
+	log.Debugf("joehattori Twalk %+v", t)
 	ref, ok := cs.LookupFID(t.FID)
 	if !ok {
 		return newErr(unix.EBADF)
@@ -1305,6 +1320,7 @@ func (t *Twalk) handle(cs *connState) message {
 
 // handle implements handler.handle.
 func (t *Twalkgetattr) handle(cs *connState) message {
+	log.Debugf("joehattori Twalkgetattr %+v", t)
 	ref, ok := cs.LookupFID(t.FID)
 	if !ok {
 		return newErr(unix.EBADF)
