@@ -289,6 +289,7 @@ func openAnyFile(pathDebug string, fn func(mode int) (*fd.FD, error)) (*fd.FD, b
 	var err error
 	for i, option := range options {
 		var file *fd.FD
+		log.Debugf("Trying to open %s", pathDebug)
 		file, err = fn(option.mode)
 		if err == nil {
 			// Succeeded opening the file, we're done.

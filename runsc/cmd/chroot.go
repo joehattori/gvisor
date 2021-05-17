@@ -79,7 +79,7 @@ func pivotRoot(root string) error {
 
 // setUpChroot creates an empty directory with runsc mounted at /runsc and proc
 // mounted at /proc.
-func setUpChroot(pidns bool) error {
+func setUpChroot(pidns bool, specRootPath string) error {
 	// We are a new mount namespace, so we can use /tmp as a directory to
 	// construct a new root.
 	chroot := os.TempDir()
@@ -122,6 +122,7 @@ func setUpChroot(pidns bool) error {
 		return fmt.Errorf("error mouting config in chroot: %v", err)
 	}
 
+	// for _, dir := range []string{"/etc", "/dev", "/sys", "/tmp", "/root"} {
 	for _, dir := range []string{"/etc", "/dev", "/sys", "/tmp"} {
 		if err := os.Mkdir(filepath.Join(chroot, dir), 0700); err != nil {
 			return fmt.Errorf("error creating %v in chroot: %v", dir, err)
@@ -141,11 +142,45 @@ func setUpChroot(pidns bool) error {
 		return fmt.Errorf("error writing to /etc/hostname: %v", err)
 	}
 
+	// specRoot := filepath.Join(chroot, "root")
+	// if err := unix.Mount(specRootPath, specRoot, "bind", unix.MS_BIND|unix.MS_REC, ""); err != nil {
+	// 	return fmt.Errorf("mounting root on root (%q) err: %v", specRoot, err)
+	// }
+	dirs, _ := ioutil.ReadDir(specRootPath)
+	for _, dir := range dirs {
+		dst := filepath.Join(chroot, dir.Name())
+		src := filepath.Join(specRootPath, dir.Name())
+		if _, err := os.Stat(dst); !os.IsNotExist(err) {
+			log.Debugf("directory %s already exists.", dst)
+			continue
+		}
+		fi, err := os.Stat(src)
+		if err != nil {
+			Fatalf("os.Stat failed: %v", err)
+		}
+		if fi.IsDir() {
+			if err := os.Mkdir(dst, 0777); err != nil {
+				return fmt.Errorf("mounting directory in /tmp: %v", err)
+			}
+			if err := unix.Mount(src, dst, "bind", unix.MS_BIND|unix.MS_REC, ""); err != nil {
+				return fmt.Errorf("mounting root on root (%q) err: %v", dst, err)
+			}
+		}
+	}
+
 	if err := unix.Mount("", chroot, "", unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_BIND, ""); err != nil {
 		return fmt.Errorf("error remounting chroot in read-only: %v", err)
 	}
 
 	return pivotRoot(chroot)
+}
+
+func walkDir(path string) {
+	log.Debugf("walking %s", path)
+	files, _ := ioutil.ReadDir(path)
+	for _, f := range files {
+		log.Debugf("%s", f.Name())
+	}
 }
 
 func readETCMounts(bundleDir string) (mounts []specs.Mount, err error) {

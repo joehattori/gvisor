@@ -30,14 +30,23 @@ func initWasm() error {
 	engine := wasmer.NewEngine()
 	store := wasmer.NewStore(engine)
 
-	wasiEnv, _ := wasmer.NewWasiStateBuilder("wasi-test-program").
+	wasiEnv, err := wasmer.NewWasiStateBuilder("rustfer").
 		PreopenDirectory(".").
 		InheritStdout().
 		InheritStderr().
 		Finalize()
+	if err != nil {
+		return err
+	}
 	module, err := wasmer.NewModule(store, wasmBytes)
+	if err != nil {
+		return err
+	}
 
-	importObject, _ := wasiEnv.GenerateImportObject(store, module)
+	importObject, err := wasiEnv.GenerateImportObject(store, module)
+	if err != nil {
+		return err
+	}
 	instance, err := wasmer.NewInstance(module, importObject)
 	if err != nil {
 		return err
@@ -148,10 +157,12 @@ func decodeJsonBytes(bs []byte, m message) error {
 	reader := bytes.NewReader(bs)
 	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(m); err == nil {
+	var err error
+	if err = decoder.Decode(m); err == nil {
 		return nil
 	}
 	reader.Reset(bs)
+	log.Debugf("Failed to decode %s to %T: %v", string(bs), m, err)
 	rlerror := &Rlerror{}
 	if err := decoder.Decode(rlerror); err != nil {
 		return fmt.Errorf("Parsing Rlerror: %v %v", err, string(bs))

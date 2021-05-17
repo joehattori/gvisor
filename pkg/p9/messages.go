@@ -592,10 +592,10 @@ func (t *Tlopen) String() string {
 // Rlopen is a open response.
 type Rlopen struct {
 	// QID is the file's QID.
-	QID QID `json:qid`
+	QID QID `json:"qid"`
 
 	// IoUnit is the recommended I/O unit.
-	IoUnit uint32 `json:io_unit`
+	IoUnit uint32 `json:"io_unit"`
 
 	filePayload
 }

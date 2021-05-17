@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{self, File as OsFile};
+use std::hash::{Hash, Hasher};
 use std::io::{self, prelude::*};
 use std::os::wasi::prelude::*;
 use std::path::{self, Path};
 use std::sync::{Arc, Mutex};
 
-use libc;
 use oci_spec::runtime::Mount;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
-use crate::fs::{Attacher, File, LocalFile};
+use crate::fs::{Attacher, LocalFile};
 use crate::message::{QIDType, QID};
 use crate::spec_utils::is_supported_dev_mount;
 use crate::unix;
@@ -318,7 +318,7 @@ impl AttachPoint {
         }
     }
 
-    pub fn make_qid(&self, metadata: fs::Metadata) -> QID {
+    pub fn make_qid(&self, metadata: &fs::Metadata) -> QID {
         let mut devices = self.devices.lock().unwrap();
         let mut next_device = self.next_device.lock().unwrap();
         let dev = match devices.get(&metadata.dev()) {
@@ -351,7 +351,7 @@ impl AttachPoint {
 }
 
 impl Attacher for AttachPoint {
-    fn attach(&self) -> io::Result<Box<dyn File>> {
+    fn attach(&self) -> io::Result<LocalFile> {
         let mut attached = self.attached.lock().unwrap();
         if *attached {
             return Err(io::Error::new(
@@ -360,14 +360,13 @@ impl Attacher for AttachPoint {
             ));
         }
         let prefix = self.prefix.to_owned();
-        println!("prefix: {}", prefix);
         let (file, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
             option.open(&prefix)
         }))?;
         match LocalFile::new(self, file, &self.prefix, readable) {
             Ok(lf) => {
                 *attached = true;
-                Ok(Box::new(lf))
+                Ok(lf)
             }
             Err(e) => Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -386,7 +385,15 @@ impl PartialEq for AttachPoint {
 
 impl Eq for AttachPoint {}
 
-#[derive(Clone, Default, PartialEq, Eq)]
+impl Hash for AttachPoint {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // JOETODO: change here after changing PartialEq
+        self.prefix.hash(state);
+        self.config.hash(state);
+    }
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
 pub struct AttachPointConfig {
     pub ro_mount: bool,
     pub panic_on_write: bool,
@@ -410,7 +417,9 @@ pub fn open_any_file_from_parent(
     parent: &LocalFile,
     name: &str,
 ) -> io::Result<(OsFile, String, bool)> {
+    println!("open_any_file_from_parent: {} {}", &parent.host_path, name);
     let file_path = join(&parent.host_path, name);
+    println!("file_path: {}", file_path);
     let cloned = file_path.to_owned();
     let (file, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
         option.open(&cloned)

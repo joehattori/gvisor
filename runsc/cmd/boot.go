@@ -144,10 +144,22 @@ func (b *Boot) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}) 
 		}
 	}
 
+	// Get the spec from the specFD.
+	specFile := os.NewFile(uintptr(b.specFD), "spec file")
+	defer specFile.Close()
+	spec, err := specutils.ReadSpecFromFile(b.bundleDir, specFile, conf)
+	if err != nil {
+		Fatalf("reading spec: %v", err)
+	}
+	specutils.LogSpec(spec)
+
 	if b.setUpRoot {
-		if err := setUpChroot(b.pidns); err != nil {
+		if err := setUpChroot(b.pidns, spec.Root.Path); err != nil {
 			Fatalf("error setting up chroot: %v", err)
 		}
+		// if err := setupRootFSForWasm(spec.Root.Path); err != nil {
+		// 	Fatalf("error setting up chroot: %v", err)
+		// }
 
 		if !b.applyCaps && !conf.Rootless {
 			// Remove --apply-caps arg to call myself. It has already been done.
@@ -163,15 +175,6 @@ func (b *Boot) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}) 
 			panic("callSelfAsNobody must never return success")
 		}
 	}
-
-	// Get the spec from the specFD.
-	specFile := os.NewFile(uintptr(b.specFD), "spec file")
-	defer specFile.Close()
-	spec, err := specutils.ReadSpecFromFile(b.bundleDir, specFile, conf)
-	if err != nil {
-		Fatalf("reading spec: %v", err)
-	}
-	specutils.LogSpec(spec)
 
 	if b.applyCaps {
 		caps := spec.Process.Capabilities

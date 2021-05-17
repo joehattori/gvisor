@@ -1,19 +1,21 @@
+use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs;
 use std::io::{self, Error, ErrorKind};
 use std::os::raw::c_char;
 use std::os::wasi::prelude::*;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-use crate::connection::ConnState;
-use crate::fs::{Attr, AttrMask, FIDRef, File, FileMode, OpenFlags, SetAttr, SetAttrMask, FID};
+use crate::connection::{ConnState, Server, CONNECTIONS};
+use crate::fs::{
+    Attr, AttrMask, FIDRef, FileMode, LocalFile, OpenFlags, SetAttr, SetAttrMask, FID,
+};
 use crate::unix;
 use crate::wasm_mem::embed_response_to_string;
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QIDType(pub u8);
 
 impl QIDType {
@@ -52,7 +54,7 @@ const NO_FID: u64 = u32::MAX as u64;
 pub const NO_UID: u32 = u32::MAX;
 // pub const NO_GID: u32 = u32::MAX;
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QID {
     pub typ: QIDType,
     pub version: u32,
@@ -78,9 +80,12 @@ impl Tlopen {
 
 impl Request for Tlopen {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
-        let cs = ConnState::get_conn_state(io_fd);
-        let mut fid_ref = match cs.lookup_fid(&self.fid) {
-            Some(r) => r,
+        let mut c = CONNECTIONS.lock().unwrap();
+        let cs = c
+            .get_mut(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let mut fid_ref = match cs.fids.get_mut(&self.fid) {
+            Some(rf) => rf.inc_ref(),
             None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
         };
         // TODO: mutex
@@ -97,7 +102,7 @@ impl Request for Tlopen {
             }
         }
         match fid_ref.file.open(self.flags) {
-            Ok((os_file, qid, io_unit)) => {
+            Ok((_, qid, io_unit)) => {
                 fid_ref.is_open = true;
                 fid_ref.open_flags = self.flags;
                 let rlopen = Rlopen::new(qid, io_unit);
@@ -147,7 +152,10 @@ impl Tclunk {
 
 impl Request for Tclunk {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
-        let cs = ConnState::get_conn_state(io_fd);
+        let mut c = CONNECTIONS.lock().unwrap();
+        let cs = c
+            .get_mut(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
         if !cs.delete_fid(&self.fid) {
             embed_response_to_string(Rlerror::new(unix::EBADF))
         } else {
@@ -171,10 +179,15 @@ impl Tsetattrclunk {
 
 impl Request for Tsetattrclunk {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
-        let cs = ConnState::get_conn_state(io_fd);
-        match cs.lookup_fid(&self.fid) {
+        let mut c = CONNECTIONS.lock().unwrap();
+        let cs = c
+            .get_mut(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let fids = &mut cs.fids;
+        match fids.get_mut(&self.fid) {
             None => embed_response_to_string(Rlerror::new(unix::EBADF)),
-            Some(mut rf) => {
+            Some(rf) => {
+                rf.inc_ref();
                 // TODO: safetyWrite
                 let set_attr_res = if rf.is_deleted() {
                     Err(Rlerror::new(unix::EINVAL))
@@ -210,23 +223,32 @@ impl Tremove {
 
 impl Request for Tremove {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
-        let cs = ConnState::get_conn_state(io_fd);
-        match cs.lookup_fid(&self.fid) {
+        let mut c = CONNECTIONS.lock().unwrap();
+        let cs = c
+            .get_mut(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let fids = &mut cs.fids;
+        match fids.get_mut(&self.fid) {
             None => embed_response_to_string(Rlerror::new(unix::EBADF)),
             Some(rf) => {
+                rf.inc_ref();
                 // TODO: safelyGlobal
                 let res = if rf.is_root() || rf.is_deleted() {
                     Err(Rlerror::new(unix::EINVAL))
                 } else {
                     let cloned = rf.clone();
-                    let parent = rf.parent.unwrap();
-                    let name = parent.path_node.name_for(&cloned);
-                    match parent.file.unlink_at(&name, 0) {
-                        Ok(_) => {
-                            parent.mark_child_deleted(&name);
-                            Ok(())
+                    match rf.parent {
+                        Some(ref parent) => {
+                            let name = parent.path_node.name_for(&cloned);
+                            match parent.file.unlink_at(&name, 0) {
+                                Ok(_) => {
+                                    parent.mark_child_deleted(&name);
+                                    Ok(())
+                                }
+                                Err(e) => Err(Rlerror::new(extract_errno(e))),
+                            }
                         }
-                        Err(e) => Err(Rlerror::new(extract_errno(e))),
+                        None => panic!("no parent in Tremove"),
                     }
                 };
                 if !cs.delete_fid(&self.fid) {
@@ -256,7 +278,11 @@ impl Tattach {
 
 impl Request for Tattach {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
-        let cs = ConnState::get_conn_state(io_fd);
+        let mut c = CONNECTIONS.lock().unwrap();
+        let cs = c
+            .get_mut(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let server = cs.server.clone();
         if self.auth.authentication_fid != NO_FID {
             return embed_response_to_string(Rlerror::new(unix::EINVAL));
         }
@@ -264,7 +290,7 @@ impl Request for Tattach {
         if self.auth.attach_name.chars().next().unwrap() == '/' {
             self.auth.attach_name = self.auth.attach_name[1..].to_string();
         }
-        let mut file = match cs.server.attacher.attach() {
+        let mut file = match server.attacher.attach() {
             Ok(f) => f,
             Err(err) => return embed_response_to_string(Rlerror::from_err(err)),
         };
@@ -276,7 +302,7 @@ impl Request for Tattach {
             }
         };
         if !valid.file_mode {
-            file.close();
+            file.close().expect("failed closing file");
             return embed_response_to_string(Rlerror::new(unix::EINVAL));
         }
         let mut root = FIDRef {
@@ -285,13 +311,13 @@ impl Request for Tattach {
             open_flags: OpenFlags(0),
             file,
             parent: None,
-            server: cs.server.clone(),
+            server: server.clone(),
             refs: AtomicI64::new(1),
             mode: attr.file_mode.file_type(),
-            path_node: cs.server.path_tree.clone(),
+            path_node: server.path_tree.clone(),
         };
         if self.auth.attach_name.is_empty() {
-            cs.insert_fid(&self.fid, &mut root);
+            insert_fid(&mut cs.fids, &self.fid, &mut root);
             root.dec_ref();
         } else {
             let names: Vec<String> = self
@@ -300,11 +326,11 @@ impl Request for Tattach {
                 .split('/')
                 .map(|s| s.to_string())
                 .collect();
-            let (_, mut new_ref, _, _) = match do_walk(&cs, &mut root, names, false) {
+            let (_, mut new_ref, _, _) = match do_walk(server, &mut root, names, false) {
                 Ok(v) => v,
                 Err(err) => return embed_response_to_string(Rlerror::from_err(err)),
             };
-            cs.insert_fid(&self.fid, &mut new_ref);
+            insert_fid(&mut cs.fids, &self.fid, &mut new_ref);
             new_ref.dec_ref();
             root.dec_ref();
         };
@@ -324,7 +350,7 @@ fn check_safe_name(name: &str) -> io::Result<()> {
 }
 
 fn do_walk(
-    cs: &ConnState,
+    server: Server,
     rf: &mut FIDRef,
     names: Vec<String>,
     getattr: bool,
@@ -341,31 +367,44 @@ fn do_walk(
     }
     if names.len() == 0 {
         // TODO: safelyRead()
-        let (_, sf, valid_, attr_) = walk_one(vec![], rf.clone().file, vec![], getattr)?;
+        println!("do_walk 0");
+        let (_, sf, valid_, attr_) = walk_one(vec![], &mut rf.file, vec![], getattr)?;
         valid = valid_;
         attr = attr_;
-        let mut fid_ref = FIDRef {
+        let mut new_ref = FIDRef {
             is_open: false,
             open_flags: OpenFlags(0),
             refs: AtomicI64::new(0),
-            server: cs.server.clone(),
+            server,
             parent: rf.parent.clone(),
             file: sf,
             mode: rf.mode.clone(),
             path_node: rf.path_node.clone(),
             is_deleted: AtomicBool::new(rf.is_deleted()),
         };
+        println!("do_walk 1");
         if !rf.is_root() {
-            if !fid_ref.is_deleted() {
-                let name = &rf.clone().parent.unwrap().path_node.name_for(&rf);
-                rf.add_child_to_parent(&fid_ref, name);
+            if !new_ref.is_deleted() {
+                println!("do_walk 2");
+                match rf.parent {
+                    Some(ref parent) => {
+                        println!("do_walk 3");
+                        let name = parent.path_node.name_for(&rf);
+                        println!("do_walk 4");
+                        parent.path_node.add_child(&new_ref, &name);
+                        println!("do_walk 5");
+                    }
+                    None => panic!("parent should exist"),
+                }
             }
+            println!("do_walk done");
             if let Some(ref mut parent) = rf.parent {
                 parent.inc_ref();
             }
         }
-        fid_ref.inc_ref();
-        return Ok((vec![], Box::new(fid_ref), valid, attr));
+        new_ref.inc_ref();
+        println!("do_walk done");
+        return Ok((vec![], Box::new(new_ref), valid, attr));
     }
     let mut walk_ref = Box::new(rf.clone());
     walk_ref.inc_ref();
@@ -374,12 +413,13 @@ fn do_walk(
             walk_ref.dec_ref();
             return Err(Error::new(ErrorKind::InvalidData, "unix::EINVAL"));
         }
+        println!("do_walk 11");
         // TODO: safelyRead
-        let (qids_, sf, valid_, attr_) = walk_one(qids, walk_ref.clone().file, vec![&name], true)
+        let (qids_, sf, valid_, attr_) = walk_one(qids, &mut walk_ref.file, vec![&name], true)
             .map_err(|e| {
-            walk_ref.dec_ref();
-            e
-        })?;
+                walk_ref.dec_ref();
+                e
+            })?;
         qids = qids_;
         valid = valid_;
         attr = attr_;
@@ -388,12 +428,14 @@ fn do_walk(
             is_open: false,
             open_flags: OpenFlags(0),
             refs: AtomicI64::new(0),
-            server: cs.server.clone(),
-            parent: Some(walk_ref.clone()),
+            server: server.clone(),
+            // parent: Some(walk_ref.clone()),
+            parent: Some(Box::new(*walk_ref.clone())),
             file: sf,
             mode: attr.file_mode.clone(),
             path_node: walk_ref.path_node.path_node_for(&name),
         };
+        println!("do_walk 12");
         walk_ref.path_node.add_child(&new_ref, &name);
         walk_ref = Box::new(new_ref);
         walk_ref.inc_ref();
@@ -403,12 +445,11 @@ fn do_walk(
 
 fn walk_one(
     mut qids: Vec<QID>,
-    mut from: Box<dyn File>,
+    from: &mut LocalFile,
     names: Vec<&str>,
     getattr: bool,
-) -> io::Result<(Vec<QID>, Box<dyn File>, AttrMask, Attr)> {
+) -> io::Result<(Vec<QID>, LocalFile, AttrMask, Attr)> {
     if names.len() > 1 {
-        println!("walk_one 0");
         return Err(Error::new(ErrorKind::InvalidData, "unix::EINVAL"));
     }
     let mut local_qids = Vec::new();
@@ -423,10 +464,7 @@ fn walk_one(
                 attr = v.3;
                 v.1
             }
-            Err(e) => {
-                println!("walk_one 1 {}", e);
-                return Err(Error::new(ErrorKind::InvalidData, format!("{}", e)));
-            }
+            Err(e) => return Err(Error::new(ErrorKind::InvalidData, format!("{}", e))),
         }
     } else {
         let res = from.walk(names)?;
@@ -439,8 +477,7 @@ fn walk_one(
                     attr = res.2;
                 }
                 Err(e) => {
-                    sf.close();
-                    println!("walk_one 2");
+                    sf.close().expect("failed closing file");
                     return Err(Error::new(ErrorKind::Other, format!("{}", e)));
                 }
             }
@@ -448,8 +485,7 @@ fn walk_one(
         sf
     };
     if local_qids.len() != 1 {
-        sf.close();
-        println!("walk_one 3");
+        sf.close().expect("failed closing file");
         Err(Error::new(ErrorKind::InvalidData, "unix::EINVAL"))
     } else {
         qids.append(&mut local_qids);
@@ -471,8 +507,11 @@ impl Tucreate {
 
 impl Request for Tucreate {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
-        let cs = ConnState::get_conn_state(io_fd);
-        let rlcreate = match self.tlcreate.perform(&cs, NO_UID) {
+        let mut c = CONNECTIONS.lock().unwrap();
+        let cs = c
+            .get_mut(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let rlcreate = match self.tlcreate.perform(cs, NO_UID) {
             Ok(rlcreate) => rlcreate,
             Err(errno) => return embed_response_to_string(Rlerror::new(errno)),
         };
@@ -495,10 +534,10 @@ impl Tlcreate {
         serde_json::from_str(&msg).unwrap()
     }
 
-    fn perform(&self, cs: &ConnState, uid: UID) -> Result<Rlcreate, i32> {
+    fn perform(&self, cs: &mut ConnState, uid: UID) -> Result<Rlcreate, i32> {
         check_safe_name(&self.name).map_err(|_| unix::EINVAL)?;
-        let mut rf = match cs.lookup_fid(&self.fid) {
-            Some(rf) => rf,
+        let rf = match cs.fids.get_mut(&self.fid) {
+            Some(rf) => rf.inc_ref(),
             None => return Err(unix::EBADF),
         };
         // TODO: safelyWrite
@@ -525,7 +564,7 @@ impl Tlcreate {
                     };
                     rf.add_child_to_path_node(&new_ref, &self.name);
                     rf.inc_ref();
-                    cs.insert_fid(&self.fid, &mut new_ref);
+                    insert_fid(&mut cs.fids, &self.fid, &mut new_ref);
                     // let file = None;
                     let rlcreate = Rlcreate {
                         rlopen: Rlopen { qid, io_unit },
@@ -544,8 +583,11 @@ impl Tlcreate {
 
 impl Request for Tlcreate {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
-        let cs = ConnState::get_conn_state(io_fd);
-        let rlcreate = match self.perform(&cs, NO_UID) {
+        let mut c = CONNECTIONS.lock().unwrap();
+        let cs = c
+            .get_mut(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let rlcreate = match self.perform(cs, NO_UID) {
             Ok(rlcreate) => rlcreate,
             Err(errno) => return embed_response_to_string(Rlerror::new(errno)),
         };
@@ -568,16 +610,27 @@ impl Twalk {
 
 impl Request for Twalk {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
-        let cs = ConnState::get_conn_state(io_fd);
-        let mut fid_ref = match cs.lookup_fid(&self.fid) {
-            Some(r) => r,
+        let mut c = CONNECTIONS.lock().unwrap();
+        let cs = c
+            .get_mut(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let server = cs.server.clone();
+        let fids = &mut cs.fids;
+        let mut fid_ref = match fids.get_mut(&self.fid) {
+            Some(r) => r.inc_ref(),
             None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
         };
         let names = self.names.clone().unwrap_or(vec![]);
-        match do_walk(&cs, &mut fid_ref, names, false) {
-            Ok((qids, mut new_ref, _, _)) => {
-                cs.insert_fid(&self.new_fid, &mut new_ref);
+        println!("Twalk 1");
+        match do_walk(server, &mut fid_ref, names, false) {
+            Ok((qids, ref mut new_ref, _, _)) => {
                 fid_ref.dec_ref();
+                println!(
+                    "Twalk: qid {:?}, host_path: {:?}",
+                    fid_ref.file.qid, fid_ref.file.host_path
+                );
+                drop(fids);
+                insert_fid(&mut cs.fids, &self.new_fid, new_ref);
                 new_ref.dec_ref();
                 embed_response_to_string(Rwalk { qids })
             }
@@ -604,20 +657,28 @@ impl Twalkgetattr {
 
 impl Request for Twalkgetattr {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
-        let cs = ConnState::get_conn_state(io_fd);
-        let mut fid_ref = match cs.lookup_fid(&self.fid) {
-            Some(r) => r,
+        println!("Twalkgetattr 1");
+        let mut c = CONNECTIONS.lock().unwrap();
+        let cs = c
+            .get_mut(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let server = cs.server.clone();
+        let fids = &mut cs.fids;
+        let mut fid_ref = match fids.get_mut(&self.fid) {
+            Some(r) => r.inc_ref(),
             None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
         };
-        match do_walk(&cs, &mut fid_ref, self.names.clone(), true) {
-            Ok((qids, mut new_ref, valid, attr)) => {
-                cs.insert_fid(&self.new_fid, &mut new_ref);
+        println!("Twalkgetattr 2");
+        match do_walk(server, &mut fid_ref, self.names.clone(), true) {
+            Ok((qids, ref mut new_ref, valid, attr)) => {
                 fid_ref.dec_ref();
+                drop(fids);
+                let fids = &mut cs.fids;
+                insert_fid(fids, &self.new_fid, new_ref);
                 new_ref.dec_ref();
                 embed_response_to_string(Rwalkgetattr { qids, valid, attr })
             }
             Err(err) => {
-                println!("Twalkgetattr failed");
                 fid_ref.dec_ref();
                 embed_response_to_string(Rlerror::from_err(err))
             }
@@ -728,4 +789,19 @@ impl Response for Rwalkgetattr {}
 
 fn extract_errno(err: Error) -> i32 {
     err.raw_os_error().unwrap_or(unix::EIO)
+}
+
+pub fn insert_fid(fids: &mut HashMap<FID, FIDRef>, fid: &FID, new_ref: &mut FIDRef) {
+    let parent_path = match new_ref.parent.clone() {
+        Some(p) => p.file.host_path,
+        None => "NONE".to_string(),
+    };
+    println!(
+        "inserting fid: {}, path: {}, qid: {:?}, parent_path: {}",
+        fid, new_ref.file.host_path, new_ref.file.qid, parent_path,
+    );
+    new_ref.inc_ref();
+    if let Some(mut orig) = fids.insert(*fid, new_ref.clone()) {
+        orig.dec_ref();
+    }
 }

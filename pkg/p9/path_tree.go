@@ -17,6 +17,7 @@ package p9
 import (
 	"fmt"
 
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/sync"
 )
 
@@ -113,6 +114,7 @@ func (p *pathNode) pathNodeFor(name string) *pathNode {
 func (p *pathNode) nameFor(ref *fidRef) string {
 	p.childMu.RLock()
 	n, ok := p.childRefNames[ref]
+	log.Debugf("joenameFor: %+v %s", *ref, n)
 	p.childMu.RUnlock()
 
 	if !ok {
@@ -127,6 +129,7 @@ func (p *pathNode) nameFor(ref *fidRef) string {
 //
 // Precondition: As addChild, plus childMu is locked for write.
 func (p *pathNode) addChildLocked(ref *fidRef, name string) {
+	log.Debugf("joeaddChild: %p %+v, %s", ref, *ref, name)
 	if n, ok := p.childRefNames[ref]; ok {
 		// This should not happen, don't proceed.
 		panic(fmt.Sprintf("unexpected fidRef %+v with path %q, wanted %q", ref, n, name))
