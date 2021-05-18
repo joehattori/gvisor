@@ -5,8 +5,8 @@ use std::os::raw::{c_char, c_void};
 use crate::connection::{ConnState, Server};
 use crate::filter::{install, install_uds_filters};
 use crate::message::{
-    Request, Tattach, Tauth, Tclunk, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate, Twalk,
-    Twalkgetattr,
+    Request, Tattach, Tauth, Tclunk, Tgetxattr, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate,
+    Twalk, Twalkgetattr,
 };
 use crate::rustfer::{
     is_read_only_mount, resolve_mounts, write_mounts, AttachPoint, AttachPointConfig, Config,
@@ -219,4 +219,9 @@ fn rustfer_twalk(io_fd: i32, msg: *mut c_char) -> *const u8 {
 #[no_mangle]
 fn rustfer_twalkgetattr(io_fd: i32, msg: *mut c_char) -> *const u8 {
     Twalkgetattr::from_ptr(msg).handle(io_fd)
+}
+
+#[no_mangle]
+fn rustfer_tgetxattr(io_fd: i32, msg: *mut c_char) -> *const u8 {
+    Tgetxattr::from_ptr(msg).handle(io_fd)
 }

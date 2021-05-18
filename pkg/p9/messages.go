@@ -1736,13 +1736,13 @@ func (r *Rxattrcreate) String() string {
 // Tgetxattr is a getxattr request.
 type Tgetxattr struct {
 	// FID refers to the file for which to get xattrs.
-	FID FID
+	FID FID `json:"fid"`
 
 	// Name is the xattr to get.
-	Name string
+	Name string `json:"name"`
 
 	// Size is the buffer size for the xattr to get.
-	Size uint64
+	Size uint64 `json:"size"`
 }
 
 // decode implements encoder.decode.
@@ -1772,7 +1772,7 @@ func (t *Tgetxattr) String() string {
 // Rgetxattr is a getxattr response.
 type Rgetxattr struct {
 	// Value is the extended attribute value.
-	Value string
+	Value string `json:"value"`
 }
 
 // decode implements encoder.decode.

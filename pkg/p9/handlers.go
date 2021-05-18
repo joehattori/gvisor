@@ -17,7 +17,6 @@ package p9
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"strings"
@@ -1323,11 +1322,6 @@ func (t *Twalk) handle(cs *connState) message {
 // handle implements handler.handle.
 func (t *Twalkgetattr) handle(cs *connState) message {
 	log.Debugf("joehattori Twalkgetattr %+v", t)
-	files, _ := ioutil.ReadDir("/usr")
-	log.Debugf("joeTwalkgetattr listing /usr")
-	for _, f := range files {
-		log.Debugf("joeTwalkgetattr %v", f.Name())
-	}
 	ref, ok := cs.LookupFID(t.FID)
 	if !ok {
 		return newErr(unix.EBADF)

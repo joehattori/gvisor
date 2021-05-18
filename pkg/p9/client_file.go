@@ -206,7 +206,10 @@ func (c *clientFile) GetXattr(name string, size uint64) (string, error) {
 	}
 
 	rgetxattr := Rgetxattr{}
-	if err := c.client.sendRecv(&Tgetxattr{FID: c.fid, Name: name, Size: size}, &rgetxattr); err != nil {
+	// if err := c.client.sendRecv(&Tgetxattr{FID: c.fid, Name: name, Size: size}, &rgetxattr); err != nil {
+	// 	return "", err
+	// }
+	if err := callWasmFunc(c.client.socket.FD(), &Tgetxattr{FID: c.fid, Name: name, Size: size}, &rgetxattr); err != nil {
 		return "", err
 	}
 

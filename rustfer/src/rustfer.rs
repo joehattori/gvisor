@@ -417,9 +417,7 @@ pub fn open_any_file_from_parent(
     parent: &LocalFile,
     name: &str,
 ) -> io::Result<(OsFile, String, bool)> {
-    println!("open_any_file_from_parent: {} {}", &parent.host_path, name);
     let file_path = join(&parent.host_path, name);
-    println!("file_path: {}", file_path);
     let cloned = file_path.to_owned();
     let (file, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
         option.open(&cloned)

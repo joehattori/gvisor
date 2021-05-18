@@ -87,6 +87,9 @@ func callWasmFunc(fd int, t message, r message) error {
 	case *Twalkgetattr:
 		r := r.(*Rwalkgetattr)
 		return rustferApi("rustfer_twalkgetattr", fd, t, r)
+	case *Tgetxattr:
+		r := r.(*Rgetxattr)
+		return rustferApi("rustfer_tgetxattr", fd, t, r)
 	default:
 		return fmt.Errorf("callWasmFunc: not handled type: %#v", t)
 	}

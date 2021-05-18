@@ -72,6 +72,7 @@ pub struct Tlopen {
     pub flags: OpenFlags,
 }
 impl Tlopen {
+    // JOETODO: put this method outside and delete other from_ptr() s to make it DRY.
     pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
         let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
         serde_json::from_str(&msg).unwrap()
@@ -80,6 +81,7 @@ impl Tlopen {
 
 impl Request for Tlopen {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
+        println!("Tlopen requested");
         let mut c = CONNECTIONS.lock().unwrap();
         let cs = c
             .get_mut(&io_fd)
@@ -135,6 +137,7 @@ impl Tauth {
 impl Request for Tauth {
     // We don't support authentication, so this just returns ENOSYS.
     fn handle(&mut self, _: i32) -> *const u8 {
+        println!("Tauth requested");
         embed_response_to_string(Rlerror::new(unix::ENOSYS))
     }
 }
@@ -152,6 +155,7 @@ impl Tclunk {
 
 impl Request for Tclunk {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
+        println!("Tclunk requested");
         let mut c = CONNECTIONS.lock().unwrap();
         let cs = c
             .get_mut(&io_fd)
@@ -179,6 +183,7 @@ impl Tsetattrclunk {
 
 impl Request for Tsetattrclunk {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
+        println!("Tsetattrclunk requested");
         let mut c = CONNECTIONS.lock().unwrap();
         let cs = c
             .get_mut(&io_fd)
@@ -223,6 +228,7 @@ impl Tremove {
 
 impl Request for Tremove {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
+        println!("Tremove requested");
         let mut c = CONNECTIONS.lock().unwrap();
         let cs = c
             .get_mut(&io_fd)
@@ -278,6 +284,7 @@ impl Tattach {
 
 impl Request for Tattach {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
+        println!("Tattach requested");
         let mut c = CONNECTIONS.lock().unwrap();
         let cs = c
             .get_mut(&io_fd)
@@ -367,7 +374,6 @@ fn do_walk(
     }
     if names.len() == 0 {
         // TODO: safelyRead()
-        println!("do_walk 0");
         let (_, sf, valid_, attr_) = walk_one(vec![], &mut rf.file, vec![], getattr)?;
         valid = valid_;
         attr = attr_;
@@ -382,28 +388,21 @@ fn do_walk(
             path_node: rf.path_node.clone(),
             is_deleted: AtomicBool::new(rf.is_deleted()),
         };
-        println!("do_walk 1");
         if !rf.is_root() {
             if !new_ref.is_deleted() {
-                println!("do_walk 2");
                 match rf.parent {
                     Some(ref parent) => {
-                        println!("do_walk 3");
                         let name = parent.path_node.name_for(&rf);
-                        println!("do_walk 4");
                         parent.path_node.add_child(&new_ref, &name);
-                        println!("do_walk 5");
                     }
                     None => panic!("parent should exist"),
                 }
             }
-            println!("do_walk done");
             if let Some(ref mut parent) = rf.parent {
                 parent.inc_ref();
             }
         }
         new_ref.inc_ref();
-        println!("do_walk done");
         return Ok((vec![], Box::new(new_ref), valid, attr));
     }
     let mut walk_ref = Box::new(rf.clone());
@@ -413,7 +412,6 @@ fn do_walk(
             walk_ref.dec_ref();
             return Err(Error::new(ErrorKind::InvalidData, "unix::EINVAL"));
         }
-        println!("do_walk 11");
         // TODO: safelyRead
         let (qids_, sf, valid_, attr_) = walk_one(qids, &mut walk_ref.file, vec![&name], true)
             .map_err(|e| {
@@ -435,7 +433,6 @@ fn do_walk(
             mode: attr.file_mode.clone(),
             path_node: walk_ref.path_node.path_node_for(&name),
         };
-        println!("do_walk 12");
         walk_ref.path_node.add_child(&new_ref, &name);
         walk_ref = Box::new(new_ref);
         walk_ref.inc_ref();
@@ -507,6 +504,7 @@ impl Tucreate {
 
 impl Request for Tucreate {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
+        println!("Tucreate requested");
         let mut c = CONNECTIONS.lock().unwrap();
         let cs = c
             .get_mut(&io_fd)
@@ -583,6 +581,7 @@ impl Tlcreate {
 
 impl Request for Tlcreate {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
+        println!("Tlcreate requested");
         let mut c = CONNECTIONS.lock().unwrap();
         let cs = c
             .get_mut(&io_fd)
@@ -651,13 +650,13 @@ pub struct Twalkgetattr {
 impl Twalkgetattr {
     pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
         let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
-        serde_json::from_str(&msg).unwrap()
+        serde_json::from_str(msg).unwrap()
     }
 }
 
 impl Request for Twalkgetattr {
     fn handle(&mut self, io_fd: i32) -> *const u8 {
-        println!("Twalkgetattr 1");
+        println!("Twalkgetattr requested");
         let mut c = CONNECTIONS.lock().unwrap();
         let cs = c
             .get_mut(&io_fd)
@@ -668,7 +667,6 @@ impl Request for Twalkgetattr {
             Some(r) => r.inc_ref(),
             None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
         };
-        println!("Twalkgetattr 2");
         match do_walk(server, &mut fid_ref, self.names.clone(), true) {
             Ok((qids, ref mut new_ref, valid, attr)) => {
                 fid_ref.dec_ref();
@@ -676,12 +674,47 @@ impl Request for Twalkgetattr {
                 let fids = &mut cs.fids;
                 insert_fid(fids, &self.new_fid, new_ref);
                 new_ref.dec_ref();
+                println!("Twalkgetattr done");
                 embed_response_to_string(Rwalkgetattr { qids, valid, attr })
             }
             Err(err) => {
                 fid_ref.dec_ref();
                 embed_response_to_string(Rlerror::from_err(err))
             }
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Tgetxattr {
+    fid: FID,
+    name: String,
+    size: u64,
+}
+impl Tgetxattr {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(msg).unwrap()
+    }
+}
+
+impl Request for Tgetxattr {
+    fn handle(&mut self, io_fd: i32) -> *const u8 {
+        println!("Tgetxattr requested");
+        let mut c = CONNECTIONS.lock().unwrap();
+        let cs = c
+            .get_mut(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let mut fid_ref = match cs.fids.get_mut(&self.fid) {
+            Some(r) => r.inc_ref(),
+            None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
+        };
+        if fid_ref.is_deleted() {
+            return embed_response_to_string(Rlerror::new(unix::EINVAL));
+        }
+        match fid_ref.file.get_xattr(&self.name, self.size) {
+            Ok(val) => embed_response_to_string(Rgetxattr::new(val)),
+            Err(err) => embed_response_to_string(Rlerror::from_err(err)),
         }
     }
 }
@@ -786,6 +819,17 @@ pub struct Rwalkgetattr {
     qids: Vec<QID>,
 }
 impl Response for Rwalkgetattr {}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Rgetxattr {
+    value: String,
+}
+impl Rgetxattr {
+    pub fn new(value: String) -> Self {
+        Self { value }
+    }
+}
+impl Response for Rgetxattr {}
 
 fn extract_errno(err: Error) -> i32 {
     err.raw_os_error().unwrap_or(unix::EIO)

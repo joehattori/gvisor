@@ -549,7 +549,6 @@ impl LocalFile {
             //     println!("open any file: {}", path);
             //     reopen_proc_fd(&file, option)
             // }))?;
-            println!("walk empty");
             let metadata = stdfs::metadata(self.host_path.clone())?;
             let readable = false;
             let stat = self.fstat().unwrap();
@@ -569,9 +568,7 @@ impl LocalFile {
         let mut last = self.clone();
         let mut last_stat: libc::stat = unsafe { std::mem::zeroed() };
         let mut qids = Vec::new();
-        println!("walk nonempty");
         for name in names {
-            println!("walk name: {}", name);
             let (file, path, readable) = open_any_file_from_parent(&last, name)?;
             if &last != self {
                 last.close().expect("failed closing");
@@ -691,6 +688,16 @@ impl LocalFile {
         let stat = self.fstat()?;
         let (mask, attr) = self.fill_attr(&stat);
         Ok((self.qid, mask, attr))
+    }
+
+    pub fn get_xattr(&self, name: &str, size: u64) -> io::Result<String> {
+        if !self.attach_point.config.enable_x_attr {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("operation not supported"),
+            ));
+        }
+        panic!("get_xattr unsupported");
     }
 
     pub fn set_attr(&self, valid: SetAttrMask, attr: SetAttr) -> io::Result<()> {

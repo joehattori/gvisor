@@ -11,6 +11,7 @@ pub fn alloc(size: usize) -> *mut c_void {
 }
 
 pub fn embed_response_to_string<T: Response + serde_traitobject::Any>(response: T) -> *const u8 {
+    println!("request done\n");
     let response = serde_traitobject::Box::new(response);
     let s = serde_json::to_string(&response).unwrap();
     let ptr = alloc(s.len());
