@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fs::{self, File as OsFile};
+use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{self, prelude::*};
 use std::os::wasi::prelude::*;
@@ -8,7 +8,7 @@ use std::path::{self, Path};
 use std::sync::{Arc, Mutex};
 
 use oci_spec::runtime::Mount;
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
 
 use crate::fs::{Attacher, LocalFile};
@@ -359,11 +359,14 @@ impl Attacher for AttachPoint {
                 format!("attach point already attached, prefix: {}", self.prefix),
             ));
         }
-        let prefix = self.prefix.to_owned();
-        let (file, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
-            option.open(&prefix)
-        }))?;
-        match LocalFile::new(self, file, &self.prefix, readable) {
+        // JOETODO: open_any_file
+        // let prefix = self.prefix.to_owned();
+        // let (file, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
+        //     option.open(&prefix)
+        // }))?;
+        let metadata = fs::metadata(&self.prefix)?;
+        let readable = true;
+        match LocalFile::new(self, &metadata, &self.prefix, readable) {
             Ok(lf) => {
                 *attached = true;
                 Ok(lf)
@@ -413,21 +416,38 @@ fn join(parent: &str, child: &str) -> String {
         .to_string()
 }
 
+// Wasi currently doesn't support reading hard links, so contain them in a static HashMap.
+static SYMLINK_PATHS: Lazy<HashMap<String, String>> = Lazy::new(|| {
+    let mut s = HashMap::new();
+    s.insert(
+        "/usr/lib64/ld-linux-x86-64.so.2".to_string(),
+        "/lib/x86_64-linux-gnu/ld-2.31.so".to_string(),
+    );
+    s.insert("/var/run".to_string(), "/run".to_string());
+    s
+});
+
 pub fn open_any_file_from_parent(
     parent: &LocalFile,
     name: &str,
-) -> io::Result<(OsFile, String, bool)> {
-    let file_path = join(&parent.host_path, name);
-    let cloned = file_path.to_owned();
-    let (file, readable) = open_any_file(Box::new(move |option: &fs::OpenOptions| {
-        option.open(&cloned)
-    }))?;
-    Ok((file, file_path, readable))
+) -> io::Result<(fs::Metadata, String, bool)> {
+    let name = join(&parent.host_path, name);
+    println!("open_any_file_from_parent: before reading {:?}", name);
+    let file_path = SYMLINK_PATHS
+        .get(&name)
+        .map(|s| s.to_string())
+        .unwrap_or(name);
+    println!("open_any_file_from_parent: after reading {:?}", file_path);
+    // let metadata = fs::symlink_metadata(&file_path).expect("failed to get metadata");
+    let metadata = fs::metadata(&file_path).expect("failed to obtain metadata.");
+    println!("hello");
+    let readable = true;
+    Ok((metadata, file_path, readable))
 }
 
 pub fn open_any_file<'a>(
-    f: Box<dyn Fn(&fs::OpenOptions) -> io::Result<OsFile>>,
-) -> io::Result<(OsFile, bool)> {
+    f: Box<dyn Fn(&fs::OpenOptions) -> io::Result<fs::Metadata>>,
+) -> io::Result<(fs::Metadata, bool)> {
     #[derive(Debug)]
     struct Mode<'a> {
         open_option: &'a fs::OpenOptions,

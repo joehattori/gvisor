@@ -221,14 +221,8 @@ func (t *Tauth) handle(cs *connState) message {
 	return newErr(unix.ENOSYS)
 }
 
-var (
-	twalkCount int
-	twalkAcum  int64
-)
-
 // handle implements handler.handle.
 func (t *Tattach) handle(cs *connState) message {
-	start := time.Now()
 	// Ensure no authentication FID is provided.
 	if t.Auth.AuthenticationFID != NoFID {
 		return newErr(unix.EINVAL)
@@ -271,10 +265,6 @@ func (t *Tattach) handle(cs *connState) message {
 	// Attach the root?
 	if len(t.Auth.AttachName) == 0 {
 		cs.InsertFID(t.FID, root)
-		diff := time.Since(start).Microseconds()
-		twalkCount++
-		twalkAcum += diff
-		log.Debugf("joewalkcli %v, %v", twalkAcum/int64(twalkCount), twalkCount)
 		return &Rattach{QID: qid}
 	}
 
@@ -289,10 +279,6 @@ func (t *Tattach) handle(cs *connState) message {
 
 	// Insert the FID.
 	cs.InsertFID(t.FID, newRef)
-	diff := time.Since(start).Microseconds()
-	twalkCount++
-	twalkAcum += diff
-	log.Debugf("joewalkcli %v, %v", twalkAcum/int64(twalkCount), twalkCount)
 	return &Rattach{QID: qid}
 }
 
@@ -1326,14 +1312,20 @@ func (t *Twalkgetattr) handle(cs *connState) message {
 	if !ok {
 		return newErr(unix.EBADF)
 	}
-	defer ref.DecRef()
+	defer func() {
+		ref.DecRef()
+		log.Debugf("joeTwalkgetattr: ref: %d", ref.refs)
+	}()
 
 	// Do the walk.
 	qids, newRef, valid, attr, err := doWalk(cs, ref, t.Names, true)
 	if err != nil {
 		return newErr(err)
 	}
-	defer newRef.DecRef()
+	defer func() {
+		newRef.DecRef()
+		log.Debugf("joeTwalkgetattr: newref: %d", newRef.refs)
+	}()
 
 	// Install the new FID.
 	cs.InsertFID(t.NewFID, newRef)

@@ -1,16 +1,17 @@
-use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs;
 use std::io::{self, Error, ErrorKind};
-use std::os::raw::c_char;
-use std::os::wasi::prelude::*;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::os::{raw::c_char, wasi::prelude::*};
+use std::sync::{
+    atomic::{AtomicBool, AtomicI64},
+    Arc, Mutex,
+};
 
 use serde::{Deserialize, Serialize};
 
-use crate::connection::{ConnState, Server, CONNECTIONS};
+use crate::connection::{ConnState, Server};
 use crate::fs::{
-    Attr, AttrMask, FIDRef, FileMode, LocalFile, OpenFlags, SetAttr, SetAttrMask, FID,
+    Attr, AttrMask, FIDEntry, FIDRef, FileMode, LocalFile, OpenFlags, SetAttr, SetAttrMask, FID,
 };
 use crate::unix;
 use crate::wasm_mem::embed_response_to_string;
@@ -52,7 +53,7 @@ pub type GID = u32;
 
 const NO_FID: u64 = u32::MAX as u64;
 pub const NO_UID: u32 = u32::MAX;
-// pub const NO_GID: u32 = u32::MAX;
+pub const NO_GID: u32 = u32::MAX;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QID {
@@ -63,7 +64,7 @@ pub struct QID {
 
 pub trait Request {
     // JOETODO: hold response type as trait type. e.g. Twalk <-> Rwalk
-    fn handle(&mut self, io_fd: i32) -> *const u8;
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,39 +81,39 @@ impl Tlopen {
 }
 
 impl Request for Tlopen {
-    fn handle(&mut self, io_fd: i32) -> *const u8 {
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tlopen requested");
-        let mut c = CONNECTIONS.lock().unwrap();
-        let cs = c
-            .get_mut(&io_fd)
-            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
-        let mut fid_ref = match cs.fids.get_mut(&self.fid) {
-            Some(rf) => rf.inc_ref(),
+        let mut fid_ref = match cs.lock().unwrap().lookup_fid(self.fid) {
+            Some(v) => v,
             None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
         };
         // TODO: mutex
-        if fid_ref.is_deleted.load(Ordering::Relaxed) || fid_ref.is_open || !fid_ref.mode.can_open()
-        {
+        let mut entry = fid_ref.0.lock().unwrap();
+        if *entry.is_deleted.get_mut() || entry.is_open || !entry.mode.can_open() {
+            drop(entry);
             fid_ref.dec_ref();
             return embed_response_to_string(Rlerror::new(unix::EINVAL));
         }
         // TODO: mutex
-        if fid_ref.mode.is_dir() {
+        if entry.mode.is_dir() {
             if !self.flags.is_read_only() || self.flags.truncated_flag() != 0 {
+                drop(entry);
                 fid_ref.dec_ref();
                 return embed_response_to_string(Rlerror::new(unix::EISDIR));
             }
         }
-        match fid_ref.file.open(self.flags) {
+        match entry.file.open(self.flags) {
             Ok((_, qid, io_unit)) => {
-                fid_ref.is_open = true;
-                fid_ref.open_flags = self.flags;
+                entry.is_open = true;
+                entry.open_flags = self.flags;
+                drop(entry);
+                fid_ref.dec_ref();
                 let rlopen = Rlopen::new(qid, io_unit);
                 // rlopen.set_file_payload(os_file);
-                fid_ref.dec_ref();
                 embed_response_to_string(rlopen)
             }
             Err(err) => {
+                drop(entry);
                 fid_ref.dec_ref();
                 embed_response_to_string(Rlerror::from_err(err))
             }
@@ -136,7 +137,7 @@ impl Tauth {
 
 impl Request for Tauth {
     // We don't support authentication, so this just returns ENOSYS.
-    fn handle(&mut self, _: i32) -> *const u8 {
+    fn handle(&mut self, _: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tauth requested");
         embed_response_to_string(Rlerror::new(unix::ENOSYS))
     }
@@ -154,13 +155,9 @@ impl Tclunk {
 }
 
 impl Request for Tclunk {
-    fn handle(&mut self, io_fd: i32) -> *const u8 {
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tclunk requested");
-        let mut c = CONNECTIONS.lock().unwrap();
-        let cs = c
-            .get_mut(&io_fd)
-            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
-        if !cs.delete_fid(&self.fid) {
+        if !cs.lock().unwrap().delete_fid(&self.fid) {
             embed_response_to_string(Rlerror::new(unix::EBADF))
         } else {
             embed_response_to_string(Rclunk {})
@@ -182,25 +179,24 @@ impl Tsetattrclunk {
 }
 
 impl Request for Tsetattrclunk {
-    fn handle(&mut self, io_fd: i32) -> *const u8 {
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tsetattrclunk requested");
-        let mut c = CONNECTIONS.lock().unwrap();
-        let cs = c
-            .get_mut(&io_fd)
-            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
-        let fids = &mut cs.fids;
-        match fids.get_mut(&self.fid) {
+        let mut cs = cs.lock().unwrap();
+        match cs.lookup_fid(self.fid) {
             None => embed_response_to_string(Rlerror::new(unix::EBADF)),
-            Some(rf) => {
+            Some(mut rf) => {
                 rf.inc_ref();
                 // TODO: safetyWrite
-                let set_attr_res = if rf.is_deleted() {
+                let mut entry = rf.0.lock().unwrap();
+                let set_attr_res = if entry.is_deleted() {
                     Err(Rlerror::new(unix::EINVAL))
                 } else {
-                    rf.file
+                    entry
+                        .file
                         .set_attr(self.valid, self.set_attr)
                         .map_err(|e| Rlerror::new(extract_errno(e)))
                 };
+                drop(entry);
                 rf.dec_ref();
                 if !cs.delete_fid(&self.fid) {
                     embed_response_to_string(Rlerror::new(unix::EBADF))
@@ -227,28 +223,25 @@ impl Tremove {
 }
 
 impl Request for Tremove {
-    fn handle(&mut self, io_fd: i32) -> *const u8 {
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tremove requested");
-        let mut c = CONNECTIONS.lock().unwrap();
-        let cs = c
-            .get_mut(&io_fd)
-            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
-        let fids = &mut cs.fids;
-        match fids.get_mut(&self.fid) {
+        let mut cs = cs.lock().unwrap();
+        match cs.lookup_fid(self.fid) {
             None => embed_response_to_string(Rlerror::new(unix::EBADF)),
-            Some(rf) => {
+            Some(mut rf) => {
                 rf.inc_ref();
                 // TODO: safelyGlobal
-                let res = if rf.is_root() || rf.is_deleted() {
+                let entry = rf.0.lock().unwrap();
+                let res = if entry.is_root() || entry.is_deleted() {
                     Err(Rlerror::new(unix::EINVAL))
                 } else {
-                    let cloned = rf.clone();
-                    match rf.parent {
-                        Some(ref parent) => {
-                            let name = parent.path_node.name_for(&cloned);
-                            match parent.file.unlink_at(&name, 0) {
+                    match entry.parent.clone() {
+                        Some(parent) => {
+                            let parent_entry = parent.0.lock().unwrap();
+                            let name = parent_entry.path_node.name_for(rf.clone());
+                            match parent_entry.file.unlink_at(&name, 0) {
                                 Ok(_) => {
-                                    parent.mark_child_deleted(&name);
+                                    parent_entry.mark_child_deleted(&name);
                                     Ok(())
                                 }
                                 Err(e) => Err(Rlerror::new(extract_errno(e))),
@@ -257,6 +250,7 @@ impl Request for Tremove {
                         None => panic!("no parent in Tremove"),
                     }
                 };
+                drop(entry);
                 if !cs.delete_fid(&self.fid) {
                     embed_response_to_string(Rlerror::new(unix::EBADF))
                 } else {
@@ -283,12 +277,9 @@ impl Tattach {
 }
 
 impl Request for Tattach {
-    fn handle(&mut self, io_fd: i32) -> *const u8 {
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tattach requested");
-        let mut c = CONNECTIONS.lock().unwrap();
-        let cs = c
-            .get_mut(&io_fd)
-            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let mut cs = cs.lock().unwrap();
         let server = cs.server.clone();
         if self.auth.authentication_fid != NO_FID {
             return embed_response_to_string(Rlerror::new(unix::EINVAL));
@@ -304,7 +295,7 @@ impl Request for Tattach {
         let (qid, valid, attr) = match file.get_attr(AttrMask::mask_all()) {
             Ok(v) => v,
             Err(errno) => {
-                // file.close();
+                file.close().expect("failed closing file");
                 return embed_response_to_string(Rlerror::from_err(errno));
             }
         };
@@ -312,7 +303,7 @@ impl Request for Tattach {
             file.close().expect("failed closing file");
             return embed_response_to_string(Rlerror::new(unix::EINVAL));
         }
-        let mut root = FIDRef {
+        let entry = FIDEntry {
             is_deleted: AtomicBool::new(false),
             is_open: false,
             open_flags: OpenFlags(0),
@@ -323,9 +314,9 @@ impl Request for Tattach {
             mode: attr.file_mode.file_type(),
             path_node: server.path_tree.clone(),
         };
+        let mut root = FIDRef::from_entry(entry);
         if self.auth.attach_name.is_empty() {
-            insert_fid(&mut cs.fids, &self.fid, &mut root);
-            root.dec_ref();
+            cs.insert_fid(self.fid, root.clone());
         } else {
             let names: Vec<String> = self
                 .auth
@@ -333,12 +324,11 @@ impl Request for Tattach {
                 .split('/')
                 .map(|s| s.to_string())
                 .collect();
-            let (_, mut new_ref, _, _) = match do_walk(server, &mut root, names, false) {
+            let (_, new_ref, _, _) = match do_walk(server, root.clone(), names, false) {
                 Ok(v) => v,
                 Err(err) => return embed_response_to_string(Rlerror::from_err(err)),
             };
-            insert_fid(&mut cs.fids, &self.fid, &mut new_ref);
-            new_ref.dec_ref();
+            cs.insert_fid(self.fid, new_ref);
             root.dec_ref();
         };
         embed_response_to_string(Rattach::from_qid(qid))
@@ -358,10 +348,10 @@ fn check_safe_name(name: &str) -> io::Result<()> {
 
 fn do_walk(
     server: Server,
-    rf: &mut FIDRef,
+    rf: FIDRef,
     names: Vec<String>,
     getattr: bool,
-) -> io::Result<(Vec<QID>, Box<FIDRef>, AttrMask, Attr)> {
+) -> io::Result<(Vec<QID>, FIDRef, AttrMask, Attr)> {
     let mut qids = Vec::new();
     let mut valid = AttrMask::default();
     let mut attr = Attr::default();
@@ -369,74 +359,84 @@ fn do_walk(
         check_safe_name(name)?
     }
     // TODO: safelyRead()
-    if rf.is_open {
+    let mut entry = rf.0.lock().unwrap();
+    if entry.is_open {
         return Err(Error::new(ErrorKind::Other, "source busy."));
     }
     if names.len() == 0 {
         // TODO: safelyRead()
-        let (_, sf, valid_, attr_) = walk_one(vec![], &mut rf.file, vec![], getattr)?;
+        println!("do_walk name len 0");
+        let (_, sf, valid_, attr_) = walk_one(vec![], &mut entry.file, vec![], getattr)?;
         valid = valid_;
         attr = attr_;
-        let mut new_ref = FIDRef {
+        let mut new_ref = FIDRef::from_entry(FIDEntry {
             is_open: false,
             open_flags: OpenFlags(0),
             refs: AtomicI64::new(0),
             server,
-            parent: rf.parent.clone(),
+            parent: entry.parent.clone().map(|p| p.clone()),
             file: sf,
-            mode: rf.mode.clone(),
-            path_node: rf.path_node.clone(),
-            is_deleted: AtomicBool::new(rf.is_deleted()),
-        };
-        if !rf.is_root() {
-            if !new_ref.is_deleted() {
-                match rf.parent {
-                    Some(ref parent) => {
-                        let name = parent.path_node.name_for(&rf);
-                        parent.path_node.add_child(&new_ref, &name);
-                    }
-                    None => panic!("parent should exist"),
-                }
+            mode: entry.mode.clone(),
+            path_node: entry.path_node.clone(),
+            is_deleted: AtomicBool::new(entry.is_deleted()),
+        });
+        if !entry.is_root() {
+            let mut parent = entry.parent.clone().expect("parent should exist");
+            let is_deleted = {
+                let e = new_ref.0.lock().unwrap();
+                e.is_deleted()
+            };
+            if !is_deleted {
+                let parent_entry = parent.0.lock().unwrap();
+                let name = parent_entry.path_node.name_for(rf.clone());
+                parent_entry.path_node.add_child(new_ref.clone(), &name);
             }
-            if let Some(ref mut parent) = rf.parent {
-                parent.inc_ref();
-            }
+            parent.inc_ref();
         }
         new_ref.inc_ref();
-        return Ok((vec![], Box::new(new_ref), valid, attr));
+        return Ok((vec![], new_ref, valid, attr));
     }
-    let mut walk_ref = Box::new(rf.clone());
+    println!("do_walk name len not 0");
+    drop(entry);
+    let mut walk_ref = rf;
     walk_ref.inc_ref();
     for name in names {
-        if !walk_ref.mode.is_dir() {
+        let mut walk_ref_entry = walk_ref.0.lock().unwrap();
+        if !walk_ref_entry.mode.is_dir() {
+            drop(walk_ref_entry);
             walk_ref.dec_ref();
             return Err(Error::new(ErrorKind::InvalidData, "unix::EINVAL"));
         }
         // TODO: safelyRead
-        let (qids_, sf, valid_, attr_) = walk_one(qids, &mut walk_ref.file, vec![&name], true)
-            .map_err(|e| {
-                walk_ref.dec_ref();
-                e
-            })?;
+        let (qids_, sf, valid_, attr_) =
+            match walk_one(qids, &mut walk_ref_entry.file, vec![&name], true) {
+                Ok(v) => v,
+                Err(e) => {
+                    drop(walk_ref_entry);
+                    walk_ref.dec_ref();
+                    return Err(e);
+                }
+            };
         qids = qids_;
         valid = valid_;
         attr = attr_;
-        let new_ref = FIDRef {
+        let new_ref = FIDRef::from_entry(FIDEntry {
             is_deleted: AtomicBool::new(false),
             is_open: false,
             open_flags: OpenFlags(0),
             refs: AtomicI64::new(0),
             server: server.clone(),
-            // parent: Some(walk_ref.clone()),
-            parent: Some(Box::new(*walk_ref.clone())),
+            parent: Some(walk_ref.clone()),
             file: sf,
             mode: attr.file_mode.clone(),
-            path_node: walk_ref.path_node.path_node_for(&name),
-        };
-        walk_ref.path_node.add_child(&new_ref, &name);
-        walk_ref = Box::new(new_ref);
+            path_node: walk_ref_entry.path_node.path_node_for(&name),
+        });
+        walk_ref_entry.path_node.add_child(new_ref.clone(), &name);
+        drop(walk_ref_entry);
+        walk_ref = new_ref;
         walk_ref.inc_ref();
     }
+    println!("do_walk done: {:?}", walk_ref);
     Ok((qids, walk_ref, valid, attr))
 }
 
@@ -503,12 +503,8 @@ impl Tucreate {
 }
 
 impl Request for Tucreate {
-    fn handle(&mut self, io_fd: i32) -> *const u8 {
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tucreate requested");
-        let mut c = CONNECTIONS.lock().unwrap();
-        let cs = c
-            .get_mut(&io_fd)
-            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
         let rlcreate = match self.tlcreate.perform(cs, NO_UID) {
             Ok(rlcreate) => rlcreate,
             Err(errno) => return embed_response_to_string(Rlerror::new(errno)),
@@ -532,26 +528,29 @@ impl Tlcreate {
         serde_json::from_str(&msg).unwrap()
     }
 
-    fn perform(&self, cs: &mut ConnState, uid: UID) -> Result<Rlcreate, i32> {
+    fn perform(&self, cs: Arc<Mutex<ConnState>>, uid: UID) -> Result<Rlcreate, i32> {
         check_safe_name(&self.name).map_err(|_| unix::EINVAL)?;
-        let rf = match cs.fids.get_mut(&self.fid) {
-            Some(rf) => rf.inc_ref(),
+        let mut cs = cs.lock().unwrap();
+        let mut rf = match cs.lookup_fid(self.fid) {
+            Some(v) => v,
             None => return Err(unix::EBADF),
         };
         // TODO: safelyWrite
-        if rf.is_deleted() || !rf.mode.is_dir() || rf.is_open {
+        let mut entry = rf.0.lock().unwrap();
+        if entry.is_deleted() || !entry.mode.is_dir() || entry.is_open {
+            drop(entry);
             rf.dec_ref();
             Err(unix::EINVAL)
         } else {
-            match rf
+            match entry
                 .file
                 .create(&self.name, self.open_flags, self.permissions, uid, self.gid)
             {
                 Ok((os_file, nsf, qid, io_unit)) => {
-                    let path_node = rf.path_node.path_node_for(&self.name);
-                    let mut new_ref = FIDRef {
+                    let path_node = entry.path_node.path_node_for(&self.name);
+                    let new_ref_entry = FIDEntry {
                         server: cs.server.clone(),
-                        parent: Some(Box::new(rf.clone())),
+                        parent: Some(rf.clone()),
                         file: nsf,
                         is_open: true,
                         open_flags: self.open_flags,
@@ -560,9 +559,11 @@ impl Tlcreate {
                         is_deleted: AtomicBool::new(false),
                         refs: AtomicI64::new(0),
                     };
-                    rf.add_child_to_path_node(&new_ref, &self.name);
+                    let new_ref = FIDRef::from_entry(new_ref_entry);
+                    entry.path_node.add_child(new_ref.clone(), &self.name);
+                    drop(entry);
                     rf.inc_ref();
-                    insert_fid(&mut cs.fids, &self.fid, &mut new_ref);
+                    cs.insert_fid(self.fid, new_ref);
                     // let file = None;
                     let rlcreate = Rlcreate {
                         rlopen: Rlopen { qid, io_unit },
@@ -571,6 +572,7 @@ impl Tlcreate {
                     Ok(rlcreate)
                 }
                 Err(err) => {
+                    drop(entry);
                     rf.dec_ref();
                     Err(extract_errno(err))
                 }
@@ -580,12 +582,8 @@ impl Tlcreate {
 }
 
 impl Request for Tlcreate {
-    fn handle(&mut self, io_fd: i32) -> *const u8 {
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tlcreate requested");
-        let mut c = CONNECTIONS.lock().unwrap();
-        let cs = c
-            .get_mut(&io_fd)
-            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
         let rlcreate = match self.perform(cs, NO_UID) {
             Ok(rlcreate) => rlcreate,
             Err(errno) => return embed_response_to_string(Rlerror::new(errno)),
@@ -608,29 +606,19 @@ impl Twalk {
 }
 
 impl Request for Twalk {
-    fn handle(&mut self, io_fd: i32) -> *const u8 {
-        let mut c = CONNECTIONS.lock().unwrap();
-        let cs = c
-            .get_mut(&io_fd)
-            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
+        println!("Twalk requested");
+        let mut cs = cs.lock().unwrap();
         let server = cs.server.clone();
-        let fids = &mut cs.fids;
-        let mut fid_ref = match fids.get_mut(&self.fid) {
-            Some(r) => r.inc_ref(),
+        let mut fid_ref = match cs.lookup_fid(self.fid) {
+            Some(v) => v,
             None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
         };
         let names = self.names.clone().unwrap_or(vec![]);
-        println!("Twalk 1");
-        match do_walk(server, &mut fid_ref, names, false) {
-            Ok((qids, ref mut new_ref, _, _)) => {
+        match do_walk(server, fid_ref.clone(), names, false) {
+            Ok((qids, new_ref, _, _)) => {
                 fid_ref.dec_ref();
-                println!(
-                    "Twalk: qid {:?}, host_path: {:?}",
-                    fid_ref.file.qid, fid_ref.file.host_path
-                );
-                drop(fids);
-                insert_fid(&mut cs.fids, &self.new_fid, new_ref);
-                new_ref.dec_ref();
+                cs.insert_fid(self.new_fid, new_ref);
                 embed_response_to_string(Rwalk { qids })
             }
             Err(err) => {
@@ -655,31 +643,61 @@ impl Twalkgetattr {
 }
 
 impl Request for Twalkgetattr {
-    fn handle(&mut self, io_fd: i32) -> *const u8 {
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Twalkgetattr requested");
-        let mut c = CONNECTIONS.lock().unwrap();
-        let cs = c
-            .get_mut(&io_fd)
-            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
+        let mut cs = cs.lock().unwrap();
         let server = cs.server.clone();
-        let fids = &mut cs.fids;
-        let mut fid_ref = match fids.get_mut(&self.fid) {
-            Some(r) => r.inc_ref(),
+        let mut fid_ref = match cs.lookup_fid(self.fid) {
+            Some(v) => v,
             None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
         };
-        match do_walk(server, &mut fid_ref, self.names.clone(), true) {
-            Ok((qids, ref mut new_ref, valid, attr)) => {
-                fid_ref.dec_ref();
-                drop(fids);
-                let fids = &mut cs.fids;
-                insert_fid(fids, &self.new_fid, new_ref);
+        match do_walk(server, fid_ref.clone(), self.names.clone(), true) {
+            Ok((qids, mut new_ref, valid, attr)) => {
+                cs.insert_fid(self.new_fid, new_ref.clone());
                 new_ref.dec_ref();
-                println!("Twalkgetattr done");
+                fid_ref.dec_ref();
                 embed_response_to_string(Rwalkgetattr { qids, valid, attr })
             }
             Err(err) => {
                 fid_ref.dec_ref();
                 embed_response_to_string(Rlerror::from_err(err))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Tgetattr {
+    fid: FID,
+    attr_mask: AttrMask,
+}
+impl Tgetattr {
+    pub fn from_ptr(msg: *mut c_char) -> Box<Self> {
+        let msg = unsafe { CStr::from_ptr(msg) }.to_str().unwrap();
+        serde_json::from_str(msg).unwrap()
+    }
+}
+
+impl Request for Tgetattr {
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
+        println!("Tgetattr requested");
+        let mut fid_ref = match cs.lock().unwrap().lookup_fid(self.fid) {
+            Some(v) => v,
+            None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
+        };
+
+        // JOETODO: safelyRead
+        let mut entry = fid_ref.0.lock().unwrap();
+        match entry.file.get_attr(self.attr_mask) {
+            Ok((qid, valid, attr)) => {
+                drop(entry);
+                fid_ref.dec_ref();
+                embed_response_to_string(Rgetattr { qid, valid, attr })
+            }
+            Err(e) => {
+                drop(entry);
+                fid_ref.dec_ref();
+                embed_response_to_string(Rlerror::from_err(e))
             }
         }
     }
@@ -699,20 +717,17 @@ impl Tgetxattr {
 }
 
 impl Request for Tgetxattr {
-    fn handle(&mut self, io_fd: i32) -> *const u8 {
+    fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tgetxattr requested");
-        let mut c = CONNECTIONS.lock().unwrap();
-        let cs = c
-            .get_mut(&io_fd)
-            .expect(&format!("No ConnState corresponding to fd: {}", io_fd));
-        let mut fid_ref = match cs.fids.get_mut(&self.fid) {
-            Some(r) => r.inc_ref(),
+        let mut fid_ref = match cs.lock().unwrap().lookup_fid(self.fid) {
+            Some(v) => v,
             None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
         };
-        if fid_ref.is_deleted() {
+        let entry = fid_ref.0.lock().unwrap();
+        if entry.is_deleted() {
             return embed_response_to_string(Rlerror::new(unix::EINVAL));
         }
-        match fid_ref.file.get_xattr(&self.name, self.size) {
+        match entry.file.get_xattr(&self.name, self.size) {
             Ok(val) => embed_response_to_string(Rgetxattr::new(val)),
             Err(err) => embed_response_to_string(Rlerror::from_err(err)),
         }
@@ -821,6 +836,19 @@ pub struct Rwalkgetattr {
 impl Response for Rwalkgetattr {}
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct Rgetattr {
+    valid: AttrMask,
+    qid: QID,
+    attr: Attr,
+}
+impl Rgetattr {
+    pub fn new(valid: AttrMask, qid: QID, attr: Attr) -> Self {
+        Self { valid, qid, attr }
+    }
+}
+impl Response for Rgetattr {}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Rgetxattr {
     value: String,
 }
@@ -833,19 +861,4 @@ impl Response for Rgetxattr {}
 
 fn extract_errno(err: Error) -> i32 {
     err.raw_os_error().unwrap_or(unix::EIO)
-}
-
-pub fn insert_fid(fids: &mut HashMap<FID, FIDRef>, fid: &FID, new_ref: &mut FIDRef) {
-    let parent_path = match new_ref.parent.clone() {
-        Some(p) => p.file.host_path,
-        None => "NONE".to_string(),
-    };
-    println!(
-        "inserting fid: {}, path: {}, qid: {:?}, parent_path: {}",
-        fid, new_ref.file.host_path, new_ref.file.qid, parent_path,
-    );
-    new_ref.inc_ref();
-    if let Some(mut orig) = fids.insert(*fid, new_ref.clone()) {
-        orig.dec_ref();
-    }
 }

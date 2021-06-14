@@ -142,10 +142,6 @@ func setUpChroot(pidns bool, specRootPath string) error {
 		return fmt.Errorf("error writing to /etc/hostname: %v", err)
 	}
 
-	// specRoot := filepath.Join(chroot, "root")
-	// if err := unix.Mount(specRootPath, specRoot, "bind", unix.MS_BIND|unix.MS_REC, ""); err != nil {
-	// 	return fmt.Errorf("mounting root on root (%q) err: %v", specRoot, err)
-	// }
 	dirs, _ := ioutil.ReadDir(specRootPath)
 	for _, dir := range dirs {
 		dst := filepath.Join(chroot, dir.Name())

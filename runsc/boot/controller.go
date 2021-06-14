@@ -190,7 +190,7 @@ func (cm *containerManager) StartRoot(cid *string, _ *struct{}) error {
 	// Tell the root container to start and wait for the result.
 	cm.startChan <- struct{}{}
 	if err := <-cm.startResultChan; err != nil {
-		return fmt.Errorf("starting sandbox: %v", err)
+		return fmt.Errorf("starting sandbox cm: %v", err)
 	}
 	return nil
 }

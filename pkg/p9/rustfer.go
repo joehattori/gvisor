@@ -187,7 +187,7 @@ func rustferInit() error {
 	if err != nil {
 		return err
 	}
-	confBytes, err := ioutil.ReadFile("./config/conf.json")
+	confBytes, err := ioutil.ReadFile("config/conf.json")
 	if err != nil {
 		return fmt.Errorf("api: reading conf.json failed: %v", err)
 	}
@@ -236,6 +236,6 @@ func rustferApi(apiName string, fd int, t, r message) error {
 	if err := decodeJsonBytes(bytes, r); err != nil {
 		return fmt.Errorf("%s failed: %v", apiName, err)
 	}
-	log.Debugf("joejson: %v -> %v", string(bytes), r)
+	log.Debugf("joejson: %v ->\n%v", string(bytes), r)
 	return nil
 }

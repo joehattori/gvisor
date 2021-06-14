@@ -115,6 +115,9 @@ func (p *pathNode) nameFor(ref *fidRef) string {
 	p.childMu.RLock()
 	n, ok := p.childRefNames[ref]
 	log.Debugf("joenameFor: %+v %s", *ref, n)
+	for k, v := range p.childRefNames {
+		log.Debugf("joenameFor: %+v %v", k, v)
+	}
 	p.childMu.RUnlock()
 
 	if !ok {
@@ -129,7 +132,7 @@ func (p *pathNode) nameFor(ref *fidRef) string {
 //
 // Precondition: As addChild, plus childMu is locked for write.
 func (p *pathNode) addChildLocked(ref *fidRef, name string) {
-	log.Debugf("joeaddChild: %p %+v, %s", ref, *ref, name)
+	log.Debugf("joeaddChild: %+v, %s", ref, *ref, name)
 	if n, ok := p.childRefNames[ref]; ok {
 		// This should not happen, don't proceed.
 		panic(fmt.Sprintf("unexpected fidRef %+v with path %q, wanted %q", ref, n, name))
@@ -141,6 +144,10 @@ func (p *pathNode) addChildLocked(ref *fidRef, name string) {
 	if !ok {
 		m = make(map[*fidRef]struct{})
 		p.childRefs[name] = m
+	}
+	log.Debugf("joeaddChild: %+v", ref)
+	for k, _ := range m {
+		log.Debugf("joeaddChild in loop: %+v", k)
 	}
 
 	m[ref] = struct{}{}

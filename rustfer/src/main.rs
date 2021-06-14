@@ -16,6 +16,8 @@ fn main() {
     read_dir("/");
     // read_dir("/dev");
     // read_dir("/etc");
+    read_dir("/usr/lib64");
+    read_dir("/root");
     // read_dir("/config");
     // read_dir("/proc");
     // read_dir("/proc/self");
@@ -33,23 +35,16 @@ fn read_dir(dir: &str) {
         }
     };
     for entry in read_dir {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                println!("entry: {}", e);
-                return;
+        match entry {
+            Ok(entry) => {
+                println!(
+                    "entry: {:?} filetype: {:?} is_symlink: {:?}",
+                    entry.path(),
+                    entry.file_type(),
+                    entry.file_type().unwrap().is_symlink(),
+                );
             }
+            Err(e) => println!("error occured while reading directory: {}", e),
         };
-        println!(
-            "entry: {:?} filetype: {:?} is_symlink: {:?}",
-            entry.path(),
-            entry.file_type(),
-            entry.file_type().unwrap().is_symlink(),
-        );
-        // match entry.metadata() {
-        //     // Ok(m) => println!("entry: {:?} {:?}", entry.path(), m),
-        //     Ok(m) => println!("entry: {:?}", entry.path()),
-        //     Err(e) => println!("entry: {:?} {:?}", entry.path(), e),
-        // }
     }
 }

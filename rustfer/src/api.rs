@@ -2,11 +2,11 @@ use std::ffi::CStr;
 use std::fs::File;
 use std::os::raw::{c_char, c_void};
 
-use crate::connection::{ConnState, Server};
+use crate::connection::{lookup_conn_state, ConnState, Server};
 use crate::filter::{install, install_uds_filters};
 use crate::message::{
-    Request, Tattach, Tauth, Tclunk, Tgetxattr, Tlcreate, Tlopen, Tremove, Tsetattrclunk, Tucreate,
-    Twalk, Twalkgetattr,
+    Request, Tattach, Tauth, Tclunk, Tgetattr, Tgetxattr, Tlcreate, Tlopen, Tremove, Tsetattrclunk,
+    Tucreate, Twalk, Twalkgetattr,
 };
 use crate::rustfer::{
     is_read_only_mount, resolve_mounts, write_mounts, AttachPoint, AttachPointConfig, Config,
@@ -173,55 +173,72 @@ fn configure_server(ats: Vec<AttachPoint>, io_fds: Vec<i8>) {
 
 #[no_mangle]
 fn rustfer_tlopen(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Tlopen::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Tlopen::from_ptr(msg).handle(cs)
 }
 
 #[no_mangle]
 fn rustfer_tclunk(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Tclunk::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Tclunk::from_ptr(msg).handle(cs)
 }
 
 #[no_mangle]
 fn rustfer_tsetattrclunk(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Tsetattrclunk::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Tsetattrclunk::from_ptr(msg).handle(cs)
 }
 
 #[no_mangle]
 fn rustfer_tremove(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Tremove::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Tremove::from_ptr(msg).handle(cs)
 }
 
 #[no_mangle]
 fn rustfer_tattach(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Tattach::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Tattach::from_ptr(msg).handle(cs)
 }
 
 #[no_mangle]
 fn rustfer_tucreate(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Tucreate::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Tucreate::from_ptr(msg).handle(cs)
 }
 
 #[no_mangle]
 fn rustfer_tlcreate(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Tlcreate::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Tlcreate::from_ptr(msg).handle(cs)
 }
 
 #[no_mangle]
 fn rustfer_tauth(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Tauth::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Tauth::from_ptr(msg).handle(cs)
 }
 
 #[no_mangle]
 fn rustfer_twalk(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Twalk::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Twalk::from_ptr(msg).handle(cs)
 }
 
 #[no_mangle]
 fn rustfer_twalkgetattr(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Twalkgetattr::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Twalkgetattr::from_ptr(msg).handle(cs)
+}
+
+#[no_mangle]
+fn rustfer_tgetattr(io_fd: i32, msg: *mut c_char) -> *const u8 {
+    let cs = lookup_conn_state(io_fd);
+    Tgetattr::from_ptr(msg).handle(cs)
 }
 
 #[no_mangle]
 fn rustfer_tgetxattr(io_fd: i32, msg: *mut c_char) -> *const u8 {
-    Tgetxattr::from_ptr(msg).handle(io_fd)
+    let cs = lookup_conn_state(io_fd);
+    Tgetxattr::from_ptr(msg).handle(cs)
 }

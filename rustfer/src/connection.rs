@@ -1,41 +1,70 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use once_cell::sync::Lazy;
 
 use crate::fs::{Attacher, FIDRef, PathNode, FID};
 
-pub static CONNECTIONS: Lazy<Mutex<HashMap<i32, ConnState>>> =
+static CONNECTIONS: Lazy<Mutex<HashMap<i32, Arc<Mutex<ConnState>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-#[derive(Clone)]
+pub fn lookup_conn_state(io_fd: i32) -> Arc<Mutex<ConnState>> {
+    // NEXT: change Rc RefCell to Arc Mutex?
+    let c = CONNECTIONS.lock().unwrap();
+    Arc::clone(
+        c.get(&io_fd)
+            .expect(&format!("No ConnState corresponding to fd: {}", io_fd)),
+    )
+}
+
 pub struct ConnState {
     // JOTODO: wrap with Arc, Mutex
-    pub fids: HashMap<FID, FIDRef>,
+    pub fids: Arc<Mutex<HashMap<FID, FIDRef>>>,
     pub server: Server,
 }
 
 impl ConnState {
     pub fn new(server: Server) -> Self {
         Self {
-            fids: HashMap::new(),
+            fids: Arc::new(Mutex::new(HashMap::new())),
             server,
         }
     }
 
     pub fn insert_conn_state(fd: i32, cs: Self) {
-        CONNECTIONS.lock().unwrap().insert(fd, cs);
+        CONNECTIONS
+            .lock()
+            .unwrap()
+            .insert(fd, Arc::new(Mutex::new(cs)));
+    }
+
+    pub fn lookup_fid(&mut self, fid: u64) -> Option<FIDRef> {
+        let fids = &mut self.fids.lock().unwrap();
+        match fids.get_mut(&fid) {
+            Some(rf) => {
+                rf.inc_ref();
+                Some(rf.clone())
+            }
+            None => None,
+        }
     }
 
     pub fn delete_fid(&mut self, fid: &FID) -> bool {
-        let fids = &mut self.fids;
+        let fids = &mut self.fids.lock().unwrap();
         match fids.remove(fid) {
-            Some(ref mut rf) => {
+            Some(mut rf) => {
                 rf.dec_ref();
                 true
             }
             None => false,
+        }
+    }
+    pub fn insert_fid(&mut self, fid: FID, mut new_ref: FIDRef) {
+        let fids = &mut self.fids.lock().unwrap();
+        new_ref.inc_ref();
+        if let Some(mut orig) = fids.insert(fid, new_ref) {
+            orig.dec_ref();
         }
     }
 }

@@ -105,8 +105,9 @@ func (c *clientFile) Walk(names []string) ([]QID, File, error) {
 		return nil, nil, err
 	}
 
-	if err := callWasmFunc(c.client.socket.FD(), &Twalk{FID: c.fid, NewFID: FID(fid), Names: names}, &rwalk); err != nil {
-		return nil, nil, err
+	rwalk2 := Rwalk{}
+	if err := callWasmFunc(c.client.socket.FD(), &Twalk{FID: c.fid, NewFID: FID(fid), Names: names}, &rwalk2); err != nil {
+		// return nil, nil, err
 	}
 
 	// Return a new client file.
@@ -142,8 +143,9 @@ func (c *clientFile) WalkGetAttr(components []string) ([]QID, File, AttrMask, At
 		c.client.fidPool.Put(fid)
 		return nil, nil, AttrMask{}, Attr{}, err
 	}
-	if err := callWasmFunc(c.client.socket.FD(), &Twalkgetattr{FID: c.fid, NewFID: FID(fid), Names: components}, &rwalkgetattr); err != nil {
-		return nil, nil, AttrMask{}, Attr{}, err
+	rwalkgetattr2 := Rwalkgetattr{}
+	if err := callWasmFunc(c.client.socket.FD(), &Twalkgetattr{FID: c.fid, NewFID: FID(fid), Names: components}, &rwalkgetattr2); err != nil {
+		// return nil, nil, AttrMask{}, Attr{}, err
 	}
 
 	// Return a new client file.
@@ -206,12 +208,12 @@ func (c *clientFile) GetXattr(name string, size uint64) (string, error) {
 	}
 
 	rgetxattr := Rgetxattr{}
-	// if err := c.client.sendRecv(&Tgetxattr{FID: c.fid, Name: name, Size: size}, &rgetxattr); err != nil {
-	// 	return "", err
-	// }
-	if err := callWasmFunc(c.client.socket.FD(), &Tgetxattr{FID: c.fid, Name: name, Size: size}, &rgetxattr); err != nil {
+	if err := c.client.sendRecv(&Tgetxattr{FID: c.fid, Name: name, Size: size}, &rgetxattr); err != nil {
 		return "", err
 	}
+	// if err := callWasmFunc(c.client.socket.FD(), &Tgetxattr{FID: c.fid, Name: name, Size: size}, &rgetxattr); err != nil {
+	// 	return "", err
+	// }
 
 	return rgetxattr.Value, nil
 }
@@ -377,7 +379,7 @@ func (c *clientFile) Open(flags OpenFlags) (*fd.FD, QID, uint32, error) {
 	log.Infof("rustferopen before: %v", rlopen)
 	start = time.Now()
 	if err := callWasmFunc(c.client.socket.FD(), &Tlopen{FID: c.fid, Flags: flags}, &rlopen); err != nil {
-		return nil, QID{}, 0, err
+		// 	return nil, QID{}, 0, err
 	}
 	if count > 1 {
 		after += time.Since(start)
