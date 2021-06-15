@@ -166,14 +166,14 @@ impl FileMode {
 }
 
 #[derive(Clone, Debug)]
-pub struct PathNode {
-    child_nodes: Arc<RwLock<HashMap<String, PathNode>>>,
+struct PathNode {
+    child_nodes: Arc<RwLock<HashMap<String, PathNodeRef>>>,
     child_refs: Arc<RwLock<HashMap<String, HashSet<FIDRef>>>>,
     child_ref_names: Arc<RwLock<HashMap<FIDRef, String>>>,
 }
 
 impl PathNode {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             child_nodes: Arc::new(RwLock::new(HashMap::new())),
             child_refs: Arc::new(RwLock::new(HashMap::new())),
@@ -181,8 +181,7 @@ impl PathNode {
         }
     }
 
-    fn remove_child(&mut self, fid_ref: FIDRef) {
-        println!("remove_child");
+    fn remove_child(&self, fid_ref: FIDRef) {
         // TODO: mutex
         let mut child_ref_names = self.child_ref_names.write().unwrap();
         if let Some(name) = child_ref_names.remove(&fid_ref) {
@@ -197,10 +196,7 @@ impl PathNode {
         }
     }
 
-    pub fn add_child(&self, rf: FIDRef, name: &str) {
-        {
-            println!("addChild: {}, {:?}", name, rf.0.lock().unwrap());
-        }
+    fn add_child(&self, rf: FIDRef, name: &str) {
         let mut child_ref_names = self.child_ref_names.write().unwrap();
         if let Some(n) = child_ref_names.insert(rf.clone(), name.to_string()) {
             println!("unexpected FIDRef with path {}, wanted {}", n, name);
@@ -209,16 +205,12 @@ impl PathNode {
         let mut child_refs = self.child_refs.write().unwrap();
         match child_refs.get_mut(name) {
             Some(m) => {
-                for f in m.iter() {
-                    println!("HashSet Some: {:?}", f);
-                }
                 if !m.insert(rf) {
                     println!("unexpected FIDRef with path wanted {}", name);
                     panic!("unexpected FIDRef with path wanted {}", name);
                 }
             }
             None => {
-                println!("HashSet None: {:?}", rf.clone());
                 let mut m = HashSet::new();
                 m.insert(rf);
                 child_refs.insert(name.to_string(), m);
@@ -226,37 +218,59 @@ impl PathNode {
         }
     }
 
-    pub fn name_for(&self, rf: FIDRef) -> String {
-        println!("namefor {:?}", rf);
-        let child_ref_names = self.child_ref_names.read().unwrap();
-        println!("namefor {:?}", child_ref_names);
-        // NEXT: Here is None.
-        println!("namefor got: {:?}", child_ref_names.get(&rf));
-        child_ref_names
+    fn name_for(&self, rf: FIDRef) -> String {
+        self.child_ref_names
+            .read()
+            .unwrap()
             .get(&rf)
             .expect(&format!("expected name for {:?}, none found", rf))
             .clone()
     }
+}
+
+#[derive(Debug)]
+pub struct PathNodeRef(Arc<Mutex<PathNode>>);
+impl PathNodeRef {
+    pub fn new() -> Self {
+        Self(Arc::new(Mutex::new(PathNode::new())))
+    }
+
+    fn remove_child(&self, fid_ref: FIDRef) {
+        let node = self.0.lock().unwrap();
+        node.remove_child(fid_ref);
+    }
+
+    pub fn add_child(&self, rf: FIDRef, name: &str) {
+        let node = self.0.lock().unwrap();
+        node.add_child(rf, name);
+    }
+
+    pub fn name_for(&self, rf: FIDRef) -> String {
+        self.0.lock().unwrap().name_for(rf)
+    }
 
     pub fn path_node_for(&self, name: &str) -> Self {
-        if let Some(pn) = self.child_nodes.read().unwrap().get(name) {
+        let node = self.0.lock().unwrap();
+        if let Some(pn) = node.child_nodes.read().unwrap().get(name) {
             return pn.clone();
         }
 
         // Slow path, create a new pathNode for shared use.
-        let mut child_nodes = self.child_nodes.write().unwrap();
+        let mut child_nodes = node.child_nodes.write().unwrap();
 
         if let Some(pn) = child_nodes.get(name) {
             return pn.clone();
         }
+
         let pn = Self::new();
         child_nodes.insert(name.to_string(), pn.clone());
         pn
     }
 
     pub fn remove_with_name(&self, name: &str, f: Box<dyn Fn(&FIDRef)>) -> Option<Self> {
-        let mut child_refs = self.child_refs.write().unwrap();
-        let mut child_ref_names = self.child_ref_names.write().unwrap();
+        let node = self.0.lock().unwrap();
+        let mut child_refs = node.child_refs.write().unwrap();
+        let mut child_ref_names = node.child_ref_names.write().unwrap();
         if let Some(m) = child_refs.get_mut(name) {
             for rf in m.clone().iter() {
                 m.remove(&rf.clone());
@@ -264,12 +278,13 @@ impl PathNode {
                 f(rf)
             }
         }
-        let mut child_nodes = self.child_nodes.write().unwrap();
+        let mut child_nodes = node.child_nodes.write().unwrap();
         child_nodes.remove(name)
     }
 
     fn for_each_child_ref(&self, f: Box<dyn Fn(&FIDRef, &str)>) {
-        let child_refs = self.child_refs.read().unwrap();
+        let node = self.0.lock().unwrap();
+        let child_refs = node.child_refs.read().unwrap();
         for (name, m) in child_refs.iter() {
             for rf in m.iter() {
                 f(rf, name)
@@ -278,32 +293,28 @@ impl PathNode {
     }
 
     fn for_each_child_node(&self, f: Box<dyn Fn(&Self)>) {
-        let child_nodes = self.child_nodes.read().unwrap();
+        let node = self.0.lock().unwrap();
+        let child_nodes = node.child_nodes.read().unwrap();
         for pn in child_nodes.values() {
-            f(pn)
+            f(&pn)
         }
     }
 }
 
-impl PartialEq for PathNode {
+impl PartialEq for PathNodeRef {
     fn eq(&self, other: &Self) -> bool {
-        *self.child_nodes.read().unwrap() == *other.child_nodes.read().unwrap()
-            && *self.child_refs.read().unwrap() == *other.child_refs.read().unwrap()
-        // && *self.child_ref_names.read().unwrap() == *other.child_ref_names.read().unwrap()
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
-
-impl Eq for PathNode {}
-
-impl Hash for PathNode {
+impl Eq for PathNodeRef {}
+impl Hash for PathNodeRef {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        let child_nodes = self.child_nodes.read().unwrap();
-        // let child_refs = self.child_refs.read().unwrap();
-        // let child_ref_names = self.child_ref_names.read().unwrap();
-        child_nodes.keys().collect::<Vec<_>>().hash(state);
-        child_nodes.values().collect::<Vec<_>>().hash(state);
-        // child_refs.keys().collect::<Vec<_>>().hash(state);
-        // child_ref_names.keys().collect::<Vec<_>>().hash(state);
+        Arc::as_ptr(&self.0).hash(state);
+    }
+}
+impl Clone for PathNodeRef {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
     }
 }
 
@@ -652,7 +663,6 @@ impl LocalFile {
     // File operations here.
 
     pub fn open(&mut self, flags: OpenFlags) -> io::Result<(Option<OsFile>, QID, u32)> {
-        println!("LocalFile opening: {}", self.host_path);
         if self.is_open() {
             panic!("attempting to open already opened file: {}", self.host_path);
         }
@@ -665,16 +675,8 @@ impl LocalFile {
             && self.control_readable
             && flags.os_flags() & OpenFlags::ALLOWED_OPEN_FLAGS == 0
         {
-            println!(
-                "Open reusing control file, flags: {:?}, {}",
-                flags, self.host_path
-            );
             self.host_file()
         } else {
-            println!(
-                "Open reopening file, flags: {:?}, {}",
-                flags, self.host_path
-            );
             // JOETODO
             // let option = stdfs::OpenOptions::new();
             // let file = self.host_file().unwrap();
@@ -867,11 +869,8 @@ impl LocalFile {
         &mut self,
         names: Vec<&str>,
     ) -> io::Result<(Vec<QID>, Self, AttrMask, Attr)> {
-        println!("walk_get_attr 0");
         let (qids, file, stat) = self.walk(names)?;
-        println!("walk_get_attr 1");
         let (mask, attr) = self.fill_attr(&self.metadata()?);
-        println!("walk_get_attr 2");
         Ok((qids, file, mask, attr))
     }
 
@@ -933,7 +932,7 @@ pub struct FIDEntry {
     pub is_open: bool,
     pub mode: FileMode,
     pub open_flags: OpenFlags,
-    pub path_node: PathNode,
+    pub path_node: PathNodeRef,
     pub parent: Option<FIDRef>,
     pub is_deleted: AtomicBool,
     pub server: Server,
@@ -980,29 +979,6 @@ impl std::fmt::Debug for FIDEntry {
             .field("open_flags", &self.open_flags)
             .field("path_node", &self.path_node)
             .finish()
-    }
-}
-impl PartialEq for FIDEntry {
-    fn eq(&self, other: &Self) -> bool {
-        self.file == other.file
-            && self.is_open == other.is_open
-            && self.mode == other.mode
-            && self.open_flags == other.open_flags
-            && self.parent == other.parent
-            && self.refs.load(Ordering::Relaxed) == other.refs.load(Ordering::Relaxed)
-            && self.is_deleted.load(Ordering::Relaxed) == other.is_deleted.load(Ordering::Relaxed)
-        // && self.path_node == other.path_node // JOETODO: PathNode contains FIDRef, and comparing this leads to infinite recursive call on this function.
-    }
-}
-impl Eq for FIDEntry {}
-impl PartialOrd for FIDEntry {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.file.host_path.cmp(&other.file.host_path))
-    }
-}
-impl Ord for FIDEntry {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        self.file.qid.cmp(&other.file.qid)
     }
 }
 
@@ -1065,28 +1041,13 @@ impl Ord for FIDRef {
     }
 }
 
-fn notify_delete(pn: &PathNode) {
-    pn.for_each_child_ref(Box::new(|rf: &FIDRef, _: &str| {
+fn notify_delete(node_ref: &PathNodeRef) {
+    // let node = node_ref.0.lock().unwrap();
+    node_ref.for_each_child_ref(Box::new(|rf: &FIDRef, _: &str| {
         *rf.0.lock().unwrap().is_deleted.get_mut() = true;
     }));
-    pn.for_each_child_node(Box::new(|pn: &PathNode| notify_delete(pn)));
+    node_ref.for_each_child_node(Box::new(|pn: &PathNodeRef| notify_delete(pn)));
 }
-
-// impl Clone for FIDRef {
-//     fn clone(&self) -> Self {
-//         FIDRef {
-//             file: self.file.clone(),
-//             refs: AtomicI64::new(self.refs.load(Ordering::Relaxed)),
-//             is_open: self.is_open,
-//             mode: self.mode.clone(),
-//             open_flags: self.open_flags,
-//             path_node: self.path_node.clone(),
-//             parent: self.parent.clone(),
-//             is_deleted: AtomicBool::new(self.is_deleted.load(Ordering::Relaxed)),
-//             server: self.server.clone(),
-//         }
-//     }
-// }
 
 fn reopen_proc_fd(file: &OsFile) -> io::Result<Metadata> {
     stdfs::symlink_metadata(format!("/proc/self/fd/{}", file.as_raw_fd()))

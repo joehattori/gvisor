@@ -444,6 +444,13 @@ func Mount(src, dst, typ string, flags uint32) error {
 		f.Close()
 	}
 
+	log.Debugf("specutil, src: %s, dst: %s", src, dst)
+	srcDir := path.Dir(src)
+	log.Debugf("specutil listing: %s", srcDir)
+	files, _ := ioutil.ReadDir(srcDir + "/root")
+	for _, f := range files {
+		log.Debugf("myspecutil: %s", f.Name())
+	}
 	// Do the mount.
 	if err := unix.Mount(src, dst, typ, uintptr(flags), ""); err != nil {
 		return fmt.Errorf("mount(%q, %q, %d) failed: %v", src, dst, flags, err)

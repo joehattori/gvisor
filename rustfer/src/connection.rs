@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 use once_cell::sync::Lazy;
 
-use crate::fs::{Attacher, FIDRef, PathNode, FID};
+use crate::fs::{Attacher, FIDRef, PathNodeRef, FID};
 
 static CONNECTIONS: Lazy<Mutex<HashMap<i32, Arc<Mutex<ConnState>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -19,7 +18,6 @@ pub fn lookup_conn_state(io_fd: i32) -> Arc<Mutex<ConnState>> {
 }
 
 pub struct ConnState {
-    // JOTODO: wrap with Arc, Mutex
     pub fids: Arc<Mutex<HashMap<FID, FIDRef>>>,
     pub server: Server,
 }
@@ -71,14 +69,14 @@ impl ConnState {
 
 pub struct Server {
     pub attacher: Box<dyn Attacher>,
-    pub path_tree: PathNode,
+    pub path_tree: PathNodeRef,
 }
 
 impl Server {
     pub fn new(attacher: Box<dyn Attacher>) -> Self {
         Self {
             attacher,
-            path_tree: PathNode::new(),
+            path_tree: PathNodeRef::new(),
         }
     }
 }
@@ -89,12 +87,5 @@ impl Clone for Server {
             attacher: dyn_clone::clone_box(&*self.attacher),
             path_tree: self.path_tree.clone(),
         }
-    }
-}
-
-impl Hash for Server {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // JOETODO: implement Hash for Attacher.
-        self.path_tree.hash(state);
     }
 }

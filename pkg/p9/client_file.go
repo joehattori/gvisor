@@ -25,41 +25,57 @@ import (
 	"gvisor.dev/gvisor/pkg/log"
 )
 
-var (
-	attachbefore, attachafter, attachcount int64
-)
+type averageMeasure struct {
+	key     string
+	count   int64
+	timeSum int64
+}
+
+func (a *averageMeasure) push(t int64) {
+	a.count++
+	if a.count > 1 {
+		a.timeSum += t
+		log.Infof("measure %s: ave: %v, count: %v", a.key, a.timeSum/(a.count-1), a.count)
+	}
+}
+
+var averages = make(map[string]*averageMeasure)
+
+func getOrInsertAverageMeasure(key string) *averageMeasure {
+	if a, ok := averages[key]; ok {
+		return a
+	}
+	newAve := &averageMeasure{key: key}
+	averages[key] = newAve
+	return newAve
+}
 
 // Attach attaches to a server.
 //
 // Note that authentication is not currently supported.
 func (c *Client) Attach(name string) (File, error) {
+	aveGo := getOrInsertAverageMeasure("Attach Go")
+	aveRust := getOrInsertAverageMeasure("Attach Rust")
 	start := time.Now()
+
 	fid, ok := c.fidPool.Get()
 	if !ok {
 		return nil, ErrOutOfFIDs
 	}
 
 	rattach := Rattach{}
-	log.Infof("\njoehattori: before sendRecv() on Attach %v\n", time.Now())
 
-	attachcount++
 	if err := c.sendRecv(&Tattach{FID: FID(fid), Auth: Tauth{AttachName: name, AuthenticationFID: NoFID, UID: NoUID}}, &rattach); err != nil {
 		c.fidPool.Put(fid)
 		return nil, err
 	}
-	if attachcount > 1 {
-		attachbefore += time.Since(start).Microseconds()
-		log.Debugf("joeattach before %v %v", attachbefore/attachcount, attachcount)
-	}
+	aveGo.push(time.Since(start).Microseconds())
 
 	start = time.Now()
 	if err := callWasmFunc(c.socket.FD(), &Tattach{FID: FID(fid), Auth: Tauth{AttachName: name, AuthenticationFID: NoFID, UID: NoUID}}, &rattach); err != nil {
 		return nil, err
 	}
-	if attachcount > 1 {
-		attachafter += time.Since(start).Microseconds()
-		log.Debugf("joeattach after  %v %v", attachafter/attachcount, attachcount)
-	}
+	aveRust.push(time.Since(start).Microseconds())
 
 	return c.newFile(FID(fid)), nil
 }
@@ -90,6 +106,10 @@ type clientFile struct {
 
 // Walk implements File.Walk.
 func (c *clientFile) Walk(names []string) ([]QID, File, error) {
+	aveGo := getOrInsertAverageMeasure("Walk Go")
+	aveRust := getOrInsertAverageMeasure("Walk Rust")
+	start := time.Now()
+
 	if atomic.LoadUint32(&c.closed) != 0 {
 		return nil, nil, unix.EBADF
 	}
@@ -104,11 +124,15 @@ func (c *clientFile) Walk(names []string) ([]QID, File, error) {
 		c.client.fidPool.Put(fid)
 		return nil, nil, err
 	}
+	aveGo.push(time.Since(start).Microseconds())
+
+	start = time.Now()
 
 	rwalk2 := Rwalk{}
 	if err := callWasmFunc(c.client.socket.FD(), &Twalk{FID: c.fid, NewFID: FID(fid), Names: names}, &rwalk2); err != nil {
-		// return nil, nil, err
+		return nil, nil, err
 	}
+	aveRust.push(time.Since(start).Microseconds())
 
 	// Return a new client file.
 	return rwalk.QIDs, c.client.newFile(FID(fid)), nil
@@ -116,6 +140,10 @@ func (c *clientFile) Walk(names []string) ([]QID, File, error) {
 
 // WalkGetAttr implements File.WalkGetAttr.
 func (c *clientFile) WalkGetAttr(components []string) ([]QID, File, AttrMask, Attr, error) {
+	aveGo := getOrInsertAverageMeasure("WalkGetAttr Go")
+	aveRust := getOrInsertAverageMeasure("WalkGetAttr Rust")
+	start := time.Now()
+
 	if atomic.LoadUint32(&c.closed) != 0 {
 		return nil, nil, AttrMask{}, Attr{}, unix.EBADF
 	}
@@ -143,10 +171,14 @@ func (c *clientFile) WalkGetAttr(components []string) ([]QID, File, AttrMask, At
 		c.client.fidPool.Put(fid)
 		return nil, nil, AttrMask{}, Attr{}, err
 	}
+	aveGo.push(time.Since(start).Microseconds())
+
+	start = time.Now()
 	rwalkgetattr2 := Rwalkgetattr{}
 	if err := callWasmFunc(c.client.socket.FD(), &Twalkgetattr{FID: c.fid, NewFID: FID(fid), Names: components}, &rwalkgetattr2); err != nil {
-		// return nil, nil, AttrMask{}, Attr{}, err
+		return nil, nil, AttrMask{}, Attr{}, err
 	}
+	aveRust.push(time.Since(start).Microseconds())
 
 	// Return a new client file.
 	return rwalkgetattr.QIDs, c.client.newFile(FID(fid)), rwalkgetattr.Valid, rwalkgetattr.Attr, nil
@@ -177,6 +209,10 @@ func (c *clientFile) FSync() error {
 
 // GetAttr implements File.GetAttr.
 func (c *clientFile) GetAttr(req AttrMask) (QID, AttrMask, Attr, error) {
+	aveGo := getOrInsertAverageMeasure("GetAttr Go")
+	aveRust := getOrInsertAverageMeasure("GetAttr Rust")
+	start := time.Now()
+
 	if atomic.LoadUint32(&c.closed) != 0 {
 		return QID{}, AttrMask{}, Attr{}, unix.EBADF
 	}
@@ -185,6 +221,11 @@ func (c *clientFile) GetAttr(req AttrMask) (QID, AttrMask, Attr, error) {
 	if err := c.client.sendRecv(&Tgetattr{FID: c.fid, AttrMask: req}, &rgetattr); err != nil {
 		return QID{}, AttrMask{}, Attr{}, err
 	}
+	aveGo.push(time.Since(start).Microseconds())
+	if err := callWasmFunc(c.client.socket.FD(), &Tgetattr{FID: c.fid, AttrMask: req}, &rgetattr); err != nil {
+		return QID{}, AttrMask{}, Attr{}, err
+	}
+	aveRust.push(time.Since(start).Microseconds())
 
 	return rgetattr.QID, rgetattr.Valid, rgetattr.Attr, nil
 }
@@ -352,42 +393,27 @@ func (c *clientFile) SetAttrClose(valid SetAttrMask, attr SetAttr) error {
 	return nil
 }
 
-var (
-	before, after time.Duration
-	count         int64
-)
-
 // Open implements File.Open.
 func (c *clientFile) Open(flags OpenFlags) (*fd.FD, QID, uint32, error) {
+	aveGo := getOrInsertAverageMeasure("Open Go")
+	aveRust := getOrInsertAverageMeasure("Open Rust")
+	start := time.Now()
+
 	if atomic.LoadUint32(&c.closed) != 0 {
 		return nil, QID{}, 0, unix.EBADF
 	}
 
 	rlopen := Rlopen{}
-	log.Infof("\njoehattori: before sendRecv() on Open %v\n", time.Now())
-	count++
-	start := time.Now()
 	if err := c.client.sendRecv(&Tlopen{FID: c.fid, Flags: flags}, &rlopen); err != nil {
 		return nil, QID{}, 0, err
 	}
-	if count > 1 {
-		before += time.Since(start)
-		log.Infof("joecli:average of %v", count)
-		log.Infof("joecli:before: %v µs", before.Microseconds()/count)
-	}
+	aveGo.push(time.Since(start).Microseconds())
 
-	log.Infof("rustferopen before: %v", rlopen)
 	start = time.Now()
 	if err := callWasmFunc(c.client.socket.FD(), &Tlopen{FID: c.fid, Flags: flags}, &rlopen); err != nil {
-		// 	return nil, QID{}, 0, err
+		return nil, QID{}, 0, err
 	}
-	if count > 1 {
-		after += time.Since(start)
-		log.Infof("joecli:after : %v µs", after.Microseconds()/count)
-	} else {
-		log.Debugf("joecli:initial: %v", time.Since(start))
-	}
-	log.Infof("rustferopen atfer: %v", rlopen)
+	aveRust.push(time.Since(start).Microseconds())
 
 	return rlopen.File, rlopen.QID, rlopen.IoUnit, nil
 }

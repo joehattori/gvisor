@@ -16,6 +16,8 @@ package cmd
 
 import (
 	"context"
+	"os"
+	"path"
 
 	"github.com/google/subcommands"
 	"gvisor.dev/gvisor/runsc/config"
@@ -111,5 +113,10 @@ func (c *Create) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}
 	if _, err := container.New(conf, contArgs); err != nil {
 		return Errorf("creating container: %v", err)
 	}
+
+	if err := os.Chmod(path.Join(spec.Root.Path, "root"), 0755); err != nil {
+		return Errorf("os.Chmod: %v", err)
+	}
+
 	return subcommands.ExitSuccess
 }

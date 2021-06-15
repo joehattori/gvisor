@@ -187,7 +187,7 @@ impl Request for Tsetattrclunk {
             Some(mut rf) => {
                 rf.inc_ref();
                 // TODO: safetyWrite
-                let mut entry = rf.0.lock().unwrap();
+                let entry = rf.0.lock().unwrap();
                 let set_attr_res = if entry.is_deleted() {
                     Err(Rlerror::new(unix::EINVAL))
                 } else {
@@ -365,7 +365,6 @@ fn do_walk(
     }
     if names.len() == 0 {
         // TODO: safelyRead()
-        println!("do_walk name len 0");
         let (_, sf, valid_, attr_) = walk_one(vec![], &mut entry.file, vec![], getattr)?;
         valid = valid_;
         attr = attr_;
@@ -396,7 +395,6 @@ fn do_walk(
         new_ref.inc_ref();
         return Ok((vec![], new_ref, valid, attr));
     }
-    println!("do_walk name len not 0");
     drop(entry);
     let mut walk_ref = rf;
     walk_ref.inc_ref();
@@ -436,7 +434,6 @@ fn do_walk(
         walk_ref = new_ref;
         walk_ref.inc_ref();
     }
-    println!("do_walk done: {:?}", walk_ref);
     Ok((qids, walk_ref, valid, attr))
 }
 
@@ -536,7 +533,7 @@ impl Tlcreate {
             None => return Err(unix::EBADF),
         };
         // TODO: safelyWrite
-        let mut entry = rf.0.lock().unwrap();
+        let entry = rf.0.lock().unwrap();
         if entry.is_deleted() || !entry.mode.is_dir() || entry.is_open {
             drop(entry);
             rf.dec_ref();
@@ -687,7 +684,7 @@ impl Request for Tgetattr {
         };
 
         // JOETODO: safelyRead
-        let mut entry = fid_ref.0.lock().unwrap();
+        let entry = fid_ref.0.lock().unwrap();
         match entry.file.get_attr(self.attr_mask) {
             Ok((qid, valid, attr)) => {
                 drop(entry);
@@ -719,7 +716,7 @@ impl Tgetxattr {
 impl Request for Tgetxattr {
     fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tgetxattr requested");
-        let mut fid_ref = match cs.lock().unwrap().lookup_fid(self.fid) {
+        let fid_ref = match cs.lock().unwrap().lookup_fid(self.fid) {
             Some(v) => v,
             None => return embed_response_to_string(Rlerror::new(unix::EBADF)),
         };

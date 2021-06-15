@@ -1312,20 +1312,14 @@ func (t *Twalkgetattr) handle(cs *connState) message {
 	if !ok {
 		return newErr(unix.EBADF)
 	}
-	defer func() {
-		ref.DecRef()
-		log.Debugf("joeTwalkgetattr: ref: %d", ref.refs)
-	}()
+	defer ref.DecRef()
 
-	// Do the walk.
+	// Do the walk.:
 	qids, newRef, valid, attr, err := doWalk(cs, ref, t.Names, true)
 	if err != nil {
 		return newErr(err)
 	}
-	defer func() {
-		newRef.DecRef()
-		log.Debugf("joeTwalkgetattr: newref: %d", newRef.refs)
-	}()
+	defer newRef.DecRef()
 
 	// Install the new FID.
 	cs.InsertFID(t.NewFID, newRef)

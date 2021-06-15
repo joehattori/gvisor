@@ -157,9 +157,6 @@ func (b *Boot) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}) 
 		if err := setUpChroot(b.pidns, spec.Root.Path); err != nil {
 			Fatalf("error setting up chroot: %v", err)
 		}
-		// if err := setupRootFSForWasm(spec.Root.Path); err != nil {
-		// 	Fatalf("error setting up chroot: %v", err)
-		// }
 
 		if !b.applyCaps && !conf.Rootless {
 			// Remove --apply-caps arg to call myself. It has already been done.

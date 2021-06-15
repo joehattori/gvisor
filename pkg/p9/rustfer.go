@@ -77,19 +77,22 @@ func callWasmFunc(fd int, t message, r message) error {
 	switch t := t.(type) {
 	case *Tlopen:
 		r := r.(*Rlopen)
-		return rustferApi("rustfer_tlopen", fd, t, r)
+		return rustferAPI("rustfer_tlopen", fd, t, r)
 	case *Tattach:
 		r := r.(*Rattach)
-		return rustferApi("rustfer_tattach", fd, t, r)
+		return rustferAPI("rustfer_tattach", fd, t, r)
 	case *Twalk:
 		r := r.(*Rwalk)
-		return rustferApi("rustfer_twalk", fd, t, r)
+		return rustferAPI("rustfer_twalk", fd, t, r)
 	case *Twalkgetattr:
 		r := r.(*Rwalkgetattr)
-		return rustferApi("rustfer_twalkgetattr", fd, t, r)
+		return rustferAPI("rustfer_twalkgetattr", fd, t, r)
+	case *Tgetattr:
+		r := r.(*Rgetattr)
+		return rustferAPI("rustfer_tgetattr", fd, t, r)
 	case *Tgetxattr:
 		r := r.(*Rgetxattr)
-		return rustferApi("rustfer_tgetxattr", fd, t, r)
+		return rustferAPI("rustfer_tgetxattr", fd, t, r)
 	default:
 		return fmt.Errorf("callWasmFunc: not handled type: %#v", t)
 	}
@@ -156,7 +159,7 @@ func extractMessageFromPtr(ptr int32) ([]byte, error) {
 	}
 }
 
-func decodeJsonBytes(bs []byte, m message) error {
+func decodeJSONBytes(bs []byte, m message) error {
 	reader := bytes.NewReader(bs)
 	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
@@ -205,8 +208,8 @@ func rustferInit() error {
 
 var rustferMu sync.Mutex
 
-func rustferApi(apiName string, fd int, t, r message) error {
-	log.Debugf("rustferApi: calling %s", apiName)
+func rustferAPI(apiName string, fd int, t, r message) error {
+	log.Debugf("rustferAPI: calling %s", apiName)
 	bytes, err := json.Marshal(t)
 	if err != nil {
 		return fmt.Errorf("%s failed: %v", apiName, err)
@@ -233,7 +236,7 @@ func rustferApi(apiName string, fd int, t, r message) error {
 		return fmt.Errorf("Parsing %s's response failed: %v", apiName, err)
 	}
 	defer dealloc(ptr, len(bytes))
-	if err := decodeJsonBytes(bytes, r); err != nil {
+	if err := decodeJSONBytes(bytes, r); err != nil {
 		return fmt.Errorf("%s failed: %v", apiName, err)
 	}
 	log.Debugf("joejson: %v ->\n%v", string(bytes), r)

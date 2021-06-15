@@ -5,27 +5,27 @@ go 1.16
 require (
 	cloud.google.com/go v0.75.0 // indirect
 	cloud.google.com/go/bigquery v1.8.0
-	github.com/BurntSushi/toml v0.3.1 // indirect
+	github.com/BurntSushi/toml v0.3.1
 	github.com/Microsoft/go-winio v0.4.16 // indirect
 	github.com/Microsoft/hcsshim v0.8.14 // indirect
 	github.com/bazelbuild/rules_go v0.26.0
 	github.com/bytecodealliance/wasmtime-go v0.26.0
 	github.com/cenkalti/backoff v1.1.1-0.20190506075156-2146c9339422
-	github.com/containerd/cgroups v0.0.0-20201119153540-4cbc285b3327 // indirect
-	github.com/containerd/console v1.0.1 // indirect
-	github.com/containerd/containerd v1.3.9 // indirect
+	github.com/containerd/cgroups v0.0.0-20201119153540-4cbc285b3327
+	github.com/containerd/console v1.0.1
+	github.com/containerd/containerd v1.3.9
 	github.com/containerd/continuity v0.0.0-20210208174643-50096c924a4e // indirect
-	github.com/containerd/fifo v0.0.0-20191213151349-ff969a566b00 // indirect
-	github.com/containerd/go-runc v0.0.0-20200220073739-7016d3ce2328 // indirect
+	github.com/containerd/fifo v0.0.0-20191213151349-ff969a566b00
+	github.com/containerd/go-runc v0.0.0-20200220073739-7016d3ce2328
 	github.com/containerd/ttrpc v1.0.2 // indirect
-	github.com/containerd/typeurl v0.0.0-20200205145503-b45ef1f1f737 // indirect
+	github.com/containerd/typeurl v0.0.0-20200205145503-b45ef1f1f737
 	github.com/docker/distribution v2.7.1-0.20190205005809-0d3efadf0154+incompatible // indirect
 	github.com/docker/docker v1.4.2-0.20191028175130-9e7d5ac5ea55
 	github.com/docker/go-connections v0.3.0
 	github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c // indirect
 	github.com/gofrs/flock v0.8.0
 	github.com/gogo/googleapis v1.4.0 // indirect
-	github.com/gogo/protobuf v1.3.1 // indirect
+	github.com/gogo/protobuf v1.3.1
 	github.com/golang/mock v1.4.4
 	github.com/google/btree v1.0.0
 	github.com/google/go-cmp v0.5.4
@@ -41,7 +41,7 @@ require (
 	github.com/opencontainers/runc v0.1.1 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2
 	github.com/pborman/uuid v1.2.0 // indirect
-	github.com/sirupsen/logrus v1.7.0 // indirect
+	github.com/sirupsen/logrus v1.7.0
 	github.com/syndtr/gocapability v0.0.0-20180916011248-d98352740cb2
 	github.com/vishvananda/netlink v1.0.1-0.20190930145447-2ec5bdc52b86
 	github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f // indirect

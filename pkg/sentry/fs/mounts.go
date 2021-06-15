@@ -20,7 +20,6 @@ import (
 
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/context"
-	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/refs"
 	"gvisor.dev/gvisor/pkg/sentry/kernel/auth"
 	"gvisor.dev/gvisor/pkg/sync"
@@ -572,7 +571,6 @@ func (mns *MountNamespace) resolve(ctx context.Context, root, node *Dirent, rema
 		// Make sure we didn't exhaust the traversal budget.
 		if *remainingTraversals == 0 {
 			target.DecRef(ctx)
-			log.Debugf("joeresolve0")
 			return nil, unix.ELOOP
 		}
 
@@ -588,14 +586,12 @@ func (mns *MountNamespace) resolve(ctx context.Context, root, node *Dirent, rema
 
 		// First, check if we should traverse.
 		if *remainingTraversals == 0 {
-			log.Debugf("joeresolve1")
 			return nil, unix.ELOOP
 		}
 
 		// Read the target path.
 		targetPath, err := node.Inode.Readlink(ctx)
 		if err != nil {
-			log.Debugf("joeresolve2")
 			return nil, err
 		}
 
@@ -606,7 +602,6 @@ func (mns *MountNamespace) resolve(ctx context.Context, root, node *Dirent, rema
 		*remainingTraversals--
 		d, err := mns.FindInode(ctx, root, parent, targetPath, remainingTraversals)
 		if err != nil {
-			log.Debugf("joeresolve3")
 			return nil, err
 		}
 
@@ -616,7 +611,6 @@ func (mns *MountNamespace) resolve(ctx context.Context, root, node *Dirent, rema
 		node.DecRef(ctx) // Drop for err; see above.
 
 		// Propagate the error.
-		log.Debugf("joeresolve4")
 		return nil, err
 	}
 }

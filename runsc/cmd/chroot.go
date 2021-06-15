@@ -15,14 +15,11 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 
-	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/runsc/specutils"
@@ -56,20 +53,6 @@ func pivotRoot(root string) error {
 	if err := unix.PivotRoot(".", "."); err != nil {
 		return fmt.Errorf("pivot_root failed, make sure that the root mount has a parent: %v", err)
 	}
-
-	// JOETODO: delete here
-	// walkDir := func(path string) {
-	// files, err := ioutil.ReadDir(path)
-	// if err != nil {
-	// log.Infof("Wasm chroot no such dir %v", path)
-	// return
-	// }
-	// log.Infof("Wasm chroot walking %v", path)
-	// for _, f := range files {
-	// log.Infof("Wasm chroot %v", f.Name())
-	// }
-	// }
-	// walkDir("/rustfer")
 
 	if err := unix.Unmount(".", unix.MNT_DETACH); err != nil {
 		return fmt.Errorf("error umounting the old root file system: %v", err)
@@ -122,30 +105,12 @@ func setUpChroot(pidns bool, specRootPath string) error {
 		return fmt.Errorf("error mouting config in chroot: %v", err)
 	}
 
-	// for _, dir := range []string{"/etc", "/dev", "/sys", "/tmp", "/root"} {
-	for _, dir := range []string{"/etc", "/dev", "/sys", "/tmp"} {
-		if err := os.Mkdir(filepath.Join(chroot, dir), 0700); err != nil {
-			return fmt.Errorf("error creating %v in chroot: %v", dir, err)
-		}
-	}
-
-	if err := ioutil.WriteFile(filepath.Join(chroot, "/etc/resolv.conf"), []byte("nameserver 8.8.8.8\n"), 0666); err != nil {
-		return fmt.Errorf("error writing to /etc/resolv.conf: %v", err)
-	}
-
-	if err := ioutil.WriteFile(filepath.Join(chroot, "/etc/hostname"), []byte(cid+"\n"), 0600); err != nil {
-		return fmt.Errorf("error writing to /etc/hostname: %v", err)
-	}
-
-	hosts := fmt.Sprintf("127.0.0.1\tlocalhost\n%s\t%s\n", "192.168.10.2", cid)
-	if err := ioutil.WriteFile(filepath.Join(chroot, "/etc/hosts"), []byte(hosts), 0600); err != nil {
-		return fmt.Errorf("error writing to /etc/hostname: %v", err)
-	}
-
+	// JOETODO: maybe just 1 mount is enough?
 	dirs, _ := ioutil.ReadDir(specRootPath)
 	for _, dir := range dirs {
 		dst := filepath.Join(chroot, dir.Name())
 		src := filepath.Join(specRootPath, dir.Name())
+		log.Debugf("mounting to %s", dst)
 		if _, err := os.Stat(dst); !os.IsNotExist(err) {
 			log.Debugf("directory %s already exists.", dst)
 			continue
@@ -164,6 +129,31 @@ func setUpChroot(pidns bool, specRootPath string) error {
 		}
 	}
 
+	// JOETODO: fix here
+	// if err := writeToTmpFile("/etc/resolv.conf", "nameserver 8.8.8.8\n"); err != nil {
+	// 	return err
+	// }
+	// if err := writeToTmpFile("/etc/hostname", cid+"\n"); err != nil {
+	// 	return err
+	// }
+	// hosts := fmt.Sprintf("127.0.0.1\tlocalhost\n%s\t%s\n", "192.168.10.2", cid)
+	// if err := writeToTmpFile("/etc/hosts", hosts); err != nil {
+	// 	return err
+	// }
+
+	// if err := ioutil.WriteFile(filepath.Join(chroot, "/etc/resolv.conf"), []byte("nameserver 8.8.8.8\n"), 0666); err != nil {
+	// 	return fmt.Errorf("error writing to /etc/resolv.conf: %v", err)
+	// }
+
+	// if err := ioutil.WriteFile(filepath.Join(chroot, "/etc/hostname"), []byte(cid+"\n"), 0600); err != nil {
+	// 	return fmt.Errorf("error writing to /etc/hostname: %v", err)
+	// }
+
+	// hosts := fmt.Sprintf("127.0.0.1\tlocalhost\n%s\t%s\n", "192.168.10.2", cid)
+	// if err := ioutil.WriteFile(filepath.Join(chroot, "/etc/hosts"), []byte(hosts), 0600); err != nil {
+	// 	return fmt.Errorf("error writing to /etc/hostname: %v", err)
+	// }
+
 	if err := unix.Mount("", chroot, "", unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_BIND, ""); err != nil {
 		return fmt.Errorf("error remounting chroot in read-only: %v", err)
 	}
@@ -171,28 +161,32 @@ func setUpChroot(pidns bool, specRootPath string) error {
 	return pivotRoot(chroot)
 }
 
-func walkDir(path string) {
-	log.Debugf("walking %s", path)
-	files, _ := ioutil.ReadDir(path)
+func writeToTmpFile(path, content string) error {
+	tmpFile, err := ioutil.TempFile("", filepath.Base(path))
+	log.Debugf("writing %s to %s", content, tmpFile.Name())
+	if err != nil {
+		return fmt.Errorf("error creating tmp file %v", err)
+	}
+	if _, err := tmpFile.WriteString(content); err != nil {
+		return fmt.Errorf("error writing to tmp file %s: %v", path, err)
+	}
+	return nil
+}
+
+func walkDir(path, debugMsg string) {
+	log.Debugf("%s %s", debugMsg, path)
+	log.Debugf("uid: %d", os.Geteuid())
+	stat, err := os.Stat(path)
+	if err != nil {
+		log.Debugf("error: %v", err)
+		return
+	}
+	files, err := ioutil.ReadDir(path)
+	if err != nil {
+		log.Debugf("error: %v", err)
+	}
+	log.Debugf("Perm: %v", stat.Mode())
 	for _, f := range files {
 		log.Debugf("%s", f.Name())
 	}
-}
-
-func readETCMounts(bundleDir string) (mounts []specs.Mount, err error) {
-	var bytes []byte
-	bytes, err = ioutil.ReadFile(filepath.Join(bundleDir, "/config.json"))
-	if err != nil {
-		return
-	}
-	spec := &specs.Spec{}
-	if err = json.Unmarshal(bytes, spec); err != nil {
-		return
-	}
-	for _, m := range spec.Mounts {
-		if strings.HasPrefix(m.Destination, "/etc") {
-			mounts = append(mounts, m)
-		}
-	}
-	return
 }

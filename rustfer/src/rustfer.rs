@@ -432,15 +432,12 @@ pub fn open_any_file_from_parent(
     name: &str,
 ) -> io::Result<(fs::Metadata, String, bool)> {
     let name = join(&parent.host_path, name);
-    println!("open_any_file_from_parent: before reading {:?}", name);
     let file_path = SYMLINK_PATHS
         .get(&name)
         .map(|s| s.to_string())
         .unwrap_or(name);
-    println!("open_any_file_from_parent: after reading {:?}", file_path);
     // let metadata = fs::symlink_metadata(&file_path).expect("failed to get metadata");
     let metadata = fs::metadata(&file_path).expect("failed to obtain metadata.");
-    println!("hello");
     let readable = true;
     Ok((metadata, file_path, readable))
 }

@@ -1362,10 +1362,10 @@ func (r *Rmkdir) String() string {
 // Tgetattr is a getattr request.
 type Tgetattr struct {
 	// FID is the FID to get attributes for.
-	FID FID
+	FID FID `json:"fid"`
 
 	// AttrMask is the set of attributes to get.
-	AttrMask AttrMask
+	AttrMask AttrMask `json:"attr_mask"`
 }
 
 // decode implements encoder.decode.
@@ -1393,13 +1393,13 @@ func (t *Tgetattr) String() string {
 // Rgetattr is a getattr response.
 type Rgetattr struct {
 	// Valid indicates which fields are valid.
-	Valid AttrMask
+	Valid AttrMask `json:"valid"`
 
 	// QID is the QID for this file.
-	QID
+	QID QID `json:"qid"`
 
 	// Attr is the set of attributes.
-	Attr Attr
+	Attr Attr `json:"attr"`
 }
 
 // decode implements encoder.decode.

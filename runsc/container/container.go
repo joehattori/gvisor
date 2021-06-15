@@ -160,11 +160,21 @@ type Args struct {
 	Attached bool
 }
 
+func walkDir(path, debugMsg string) {
+	log.Debugf("lising %s %s", debugMsg, path)
+	files, _ := ioutil.ReadDir(path)
+	for _, f := range files {
+		log.Debugf("%s", f.Name())
+	}
+}
+
 // New creates the container in a new Sandbox process, unless the metadata
 // indicates that an existing Sandbox should be used. The caller must call
 // Destroy() on the container.
 func New(conf *config.Config, args Args) (*Container, error) {
 	log.Debugf("Create container, cid: %s, rootDir: %q", args.ID, conf.RootDir)
+	log.Debugf("%+v", args)
+	log.Debugf("%+v", args.Spec.Root)
 	if err := validateID(args.ID); err != nil {
 		return nil, err
 	}
