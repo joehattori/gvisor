@@ -69,13 +69,13 @@ pub fn read_spec_from_file(
     Ok(spec)
 }
 
-fn abs_path<'a>(base: &'a str, rel: &'a str) -> String {
-    if Path::new(rel).is_absolute() {
-        Path::new(rel).to_str().unwrap().to_string()
-    } else {
-        Path::new(base).join(rel).to_str().unwrap().to_string()
-    }
-}
+// fn abs_path<'a>(base: &'a str, rel: &'a str) -> String {
+//     if Path::new(rel).is_absolute() {
+//         Path::new(rel).to_str().unwrap().to_string()
+//     } else {
+//         Path::new(base).join(rel).to_str().unwrap().to_string()
+//     }
+// }
 
 fn validate_spec(spec: &Spec) -> Result<(), &str> {
     match &spec.process {

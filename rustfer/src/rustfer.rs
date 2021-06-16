@@ -16,8 +16,8 @@ use crate::message::{QIDType, QID};
 use crate::spec_utils::is_supported_dev_mount;
 use crate::unix;
 
-pub const OPEN_FLAGS: i32 = unix::O_NOFOLLOW | unix::O_CLOEXEC;
-pub const ALLOWED_OPEN_FLAGS: i32 = unix::O_TRUNC;
+// pub const OPEN_FLAGS: i32 = unix::O_NOFOLLOW | unix::O_CLOEXEC;
+// pub const ALLOWED_OPEN_FLAGS: i32 = unix::O_TRUNC;
 
 pub struct Rustfer {
     // bundle_dir: String,
@@ -44,9 +44,9 @@ impl Rustfer {
         APP.set(Mutex::new(r))
     }
 
-    pub fn get() -> &'static Mutex<Self> {
-        &*APP.get().unwrap()
-    }
+    // pub fn get() -> &'static Mutex<Self> {
+    //     &*APP.get().unwrap()
+    // }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -442,45 +442,45 @@ pub fn open_any_file_from_parent(
     Ok((metadata, file_path, readable))
 }
 
-pub fn open_any_file<'a>(
-    f: Box<dyn Fn(&fs::OpenOptions) -> io::Result<fs::Metadata>>,
-) -> io::Result<(fs::Metadata, bool)> {
-    #[derive(Debug)]
-    struct Mode<'a> {
-        open_option: &'a fs::OpenOptions,
-        readable: bool,
-    }
-    let mut op = fs::OpenOptions::new();
-
-    let modes = [
-        Mode {
-            open_option: op.read(true),
-            readable: true,
-        },
-        Mode {
-            open_option: &fs::OpenOptions::new(),
-            readable: false,
-        },
-    ];
-    let mut error = io::Error::new(io::ErrorKind::Other, "");
-    for mode in modes.iter() {
-        match f(mode.open_option) {
-            Ok(file) => {
-                eprintln!("Attempt to open file succeed!");
-                return Ok((file, mode.readable));
-            }
-            Err(err) => {
-                if err.raw_os_error() == Some(unix::ENOENT) {
-                    return Err(err);
-                }
-                error = err;
-                eprintln!(
-                    "Attempt to open file failed, mode: {:?}, err: {}",
-                    mode, error
-                );
-            }
-        };
-    }
-    eprintln!("Attempt to open file failed, err: {}", error);
-    Err(error)
-}
+// pub fn open_any_file<'a>(
+//     f: Box<dyn Fn(&fs::OpenOptions) -> io::Result<fs::Metadata>>,
+// ) -> io::Result<(fs::Metadata, bool)> {
+//     #[derive(Debug)]
+//     struct Mode<'a> {
+//         open_option: &'a fs::OpenOptions,
+//         readable: bool,
+//     }
+//     let mut op = fs::OpenOptions::new();
+//
+//     let modes = [
+//         Mode {
+//             open_option: op.read(true),
+//             readable: true,
+//         },
+//         Mode {
+//             open_option: &fs::OpenOptions::new(),
+//             readable: false,
+//         },
+//     ];
+//     let mut error = io::Error::new(io::ErrorKind::Other, "");
+//     for mode in modes.iter() {
+//         match f(mode.open_option) {
+//             Ok(file) => {
+//                 eprintln!("Attempt to open file succeed!");
+//                 return Ok((file, mode.readable));
+//             }
+//             Err(err) => {
+//                 if err.raw_os_error() == Some(unix::ENOENT) {
+//                     return Err(err);
+//                 }
+//                 error = err;
+//                 eprintln!(
+//                     "Attempt to open file failed, mode: {:?}, err: {}",
+//                     mode, error
+//                 );
+//             }
+//         };
+//     }
+//     eprintln!("Attempt to open file failed, err: {}", error);
+//     Err(error)
+// }

@@ -581,11 +581,10 @@ impl Tlcreate {
 impl Request for Tlcreate {
     fn handle(&mut self, cs: Arc<Mutex<ConnState>>) -> *const u8 {
         println!("Tlcreate requested");
-        let rlcreate = match self.perform(cs, NO_UID) {
-            Ok(rlcreate) => rlcreate,
-            Err(errno) => return embed_response_to_string(Rlerror::new(errno)),
-        };
-        embed_response_to_string(rlcreate)
+        match self.perform(cs, NO_UID) {
+            Ok(rlcreate) => embed_response_to_string(rlcreate),
+            Err(errno) => embed_response_to_string(Rlerror::new(errno)),
+        }
     }
 }
 

@@ -2,19 +2,20 @@ use std::os::raw::c_void;
 
 use crate::message::Response;
 
-pub fn alloc(size: usize) -> *mut c_void {
+#[inline]
+pub fn alloc(size: usize) -> *const c_void {
     let mut buffer = Vec::with_capacity(size);
-    let ptr = buffer.as_mut_ptr();
+    let ptr = buffer.as_ptr();
     std::mem::forget(buffer);
-
-    ptr as *mut c_void
+    ptr
 }
 
 pub fn embed_response_to_string<T: Response + serde_traitobject::Any>(response: T) -> *const u8 {
-    println!("request done\n");
     let response = serde_traitobject::Box::new(response);
-    let s = serde_json::to_string(&response).unwrap();
-    let ptr = alloc(s.len());
+    let mut s = serde_json::to_string(&response).unwrap();
+    s = format!("{:0>4}", (s.len() + 4).to_string()) + &s;
+    println!("request done {}\n", s);
+    let ptr = alloc(s.len()) as *mut c_void;
     unsafe {
         std::ptr::copy(s.as_ptr() as *mut c_void, ptr, s.len());
     }

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"strconv"
+	"time"
 
 	"github.com/joehattori/wasmer-go/wasmer"
 	"gvisor.dev/gvisor/pkg/log"
@@ -138,6 +140,7 @@ func bytesAlloc(bytes []byte) (ptr int32, size int, err error) {
 }
 
 func dealloc(ptr int32, size int) {
+	start := time.Now()
 	dealloc, err := rustfer.instance.Exports.GetFunction("rustfer_deallocate")
 	if err != nil {
 		panic(err)
@@ -145,25 +148,24 @@ func dealloc(ptr int32, size int) {
 	if _, err := dealloc(ptr, size); err != nil {
 		panic(err)
 	}
+	log.Debugf("joedealloc %v", time.Since(start))
 }
 
-func extractMessageFromPtr(ptr int32) ([]byte, error) {
-	mem := rustfer.memory.Data()
-	if b := mem[ptr]; b != '{' && b != '[' {
-		return []byte{}, fmt.Errorf("Invalid JSON start: %v\nraw: %v\nperipheral: %v", (b), string(mem[ptr:ptr+100]), string(mem[ptr-100:ptr+100]))
-	}
-	for i := ptr; ; i++ {
-		if mem[i] == 0 {
-			return mem[ptr : i+1], nil
-		}
-	}
-}
+const numberPrefixLen = 4
 
-func decodeJSONBytes(bs []byte, m message) error {
+func decodeJSONBytes(ptr int32, m message) error {
+	mem := rustfer.memory.Data()[ptr:]
+
+	length, err := strconv.Atoi(string(mem[:numberPrefixLen]))
+	defer dealloc(ptr, length)
+	if err != nil {
+		return fmt.Errorf("Failed to parse wasm response %s: %v", string(mem[:100]), err)
+	}
+
+	bs := mem[numberPrefixLen:]
 	reader := bytes.NewReader(bs)
 	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
-	var err error
 	if err = decoder.Decode(m); err == nil {
 		return nil
 	}
@@ -184,7 +186,6 @@ func rustferInit() error {
 	if err != nil {
 		return fmt.Errorf("rustfer_init: failed %v", err)
 	}
-	// arrPtr, _, err := arrayAlloc(ioFds)
 	arrPtr, arrSize, err := arrayAlloc(ioFds)
 	defer dealloc(arrPtr, arrSize)
 	if err != nil {
@@ -194,7 +195,6 @@ func rustferInit() error {
 	if err != nil {
 		return fmt.Errorf("api: reading conf.json failed: %v", err)
 	}
-	// confPtr, _, err := bytesAlloc(confBytes)
 	confPtr, confSize, err := bytesAlloc(confBytes)
 	defer dealloc(confPtr, confSize)
 	if err != nil {
@@ -216,27 +216,24 @@ func rustferAPI(apiName string, fd int, t, r message) error {
 	}
 	rustferMu.Lock()
 	defer rustferMu.Unlock()
-	// ptr, _, err := bytesAlloc(bytes)
+
 	ptr, ptrSize, err := bytesAlloc(bytes)
 	defer dealloc(ptr, ptrSize)
 	if err != nil {
 		return fmt.Errorf("bytesAlloc failed: %v", err)
 	}
+
 	api, err := rustfer.instance.Exports.GetFunction(apiName)
 	if err != nil {
 		return fmt.Errorf("%s failed: %v", apiName, err)
 	}
+
 	rPtr, err := api(fd, ptr)
 	if err != nil {
 		return fmt.Errorf("%s failed: %v", apiName, err)
 	}
-	ptr = rPtr.(int32)
-	bytes, err = extractMessageFromPtr(ptr)
-	if err != nil {
-		return fmt.Errorf("Parsing %s's response failed: %v", apiName, err)
-	}
-	defer dealloc(ptr, len(bytes))
-	if err := decodeJSONBytes(bytes, r); err != nil {
+
+	if err := decodeJSONBytes(rPtr.(int32), r); err != nil {
 		return fmt.Errorf("%s failed: %v", apiName, err)
 	}
 	log.Debugf("joejson: %v ->\n%v", string(bytes), r)

@@ -22,17 +22,7 @@ pub const MS_NOSUID: i32 = 0x2;
 pub const MS_REMOUNT: i32 = 0x20;
 pub const MS_RDONLY: i32 = 0x1;
 
-pub const O_LARGEFILE: i32 = 0x0;
-pub const O_RDONLY: i32 = 0x0;
-pub const O_DIRECTORY: i32 = 0x10000;
-pub const O_NONBLOCK: i32 = 0x800;
-pub const O_PATH: i32 = 0x200000;
-pub const O_NOFOLLOW: i32 = 0x20000;
-pub const O_CLOEXEC: i32 = 0x80000;
 pub const O_TRUNC: i32 = 0x200;
-pub const O_ACCMODE: i32 = 0x3;
-pub const O_CREAT: i32 = 0x40;
-pub const O_EXCL: i32 = 0x80;
 
 pub const SYS_READ: i32 = 0;
 pub const SYS_WRITE: i32 = 1;
@@ -75,7 +65,6 @@ pub const SYS_RESTART_SYSCALL: i32 = 219;
 pub const SYS_CLOCK_GETTIME: i32 = 228;
 pub const SYS_EXIT_GROUP: i32 = 231;
 pub const SYS_EPOLL_CTL: i32 = 233;
-pub const SYS_TGKILL: i32 = 234;
 pub const SYS_OPENAT: i32 = 257;
 pub const SYS_MKDIRAT: i32 = 258;
 pub const SYS_MKNODAT: i32 = 259;
@@ -116,17 +105,12 @@ pub const SOCK_DGRAM: i32 = 0x2;
 pub const SOCK_SEQPACKET: i32 = 0x5;
 pub const SOCK_CLOEXEC: i32 = 0x80000;
 
-pub const ENOENT: i32 = 0x2;
 pub const EBADF: i32 = 0x9;
 pub const EISDIR: i32 = 0x15;
 pub const EINVAL: i32 = 0x16;
 pub const ENOSYS: i32 = 0x26;
 pub const EROFS: i32 = 0x1e;
-pub const EBUSY: i32 = 0x10;
-pub const EACCESS: i32 = 0xd;
 pub const EIO: i32 = 0x5;
-
-pub const S_IFMT: i32 = 0xf000;
 
 pub const UTIME_NOW: i32 = 0x3fffffff;
 pub const UTIME_OMIT: i32 = 0x3ffffffe;

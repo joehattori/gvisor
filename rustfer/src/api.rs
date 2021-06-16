@@ -16,7 +16,7 @@ use crate::spec_utils::{is_external_mount, read_spec_from_file};
 use crate::wasm_mem::alloc;
 
 #[no_mangle]
-fn rustfer_allocate(size: i32) -> *mut c_void {
+fn rustfer_allocate(size: i32) -> *const c_void {
     alloc(size as usize)
 }
 
